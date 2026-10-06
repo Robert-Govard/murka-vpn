@@ -64,6 +64,16 @@ func (closedReadError) Error() string { return "muxconn: closed (EOF)" }
 
 func (closedReadError) Unwrap() []error { return []error{io.EOF, ErrClosed} }
 
+// RecordAAD returns the additional data bound to control (true) or data
+// (false) records, for callers that must authenticate a record before a
+// Conn for it exists.
+func RecordAAD(control bool) []byte {
+	if control {
+		return []byte(controlRecordAAD)
+	}
+	return []byte(dataRecordAAD)
+}
+
 const (
 	dataRecordAAD    = "olcrtc/muxconn/v2/data"
 	controlRecordAAD = "olcrtc/muxconn/v2/control"
