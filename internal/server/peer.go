@@ -11,6 +11,7 @@ import (
 
 	"github.com/xtaci/smux"
 
+	"github.com/openlibrecommunity/olcrtc/internal/crypto"
 	"github.com/openlibrecommunity/olcrtc/internal/framing"
 	"github.com/openlibrecommunity/olcrtc/internal/handshake"
 	"github.com/openlibrecommunity/olcrtc/internal/logger"
@@ -60,6 +61,7 @@ type peerSession struct {
 	sessionID     string
 	deviceID      string
 	closed        bool
+	keys          *crypto.KeySet // key the peer authenticated with; guarded by Server.sessMu
 }
 
 func newPeerSession(peerID string, needsControl bool) *peerSession {
@@ -174,7 +176,7 @@ func (s *Server) installPeerControlPlane(control transport.PeerControlPlane) {
 }
 
 func (s *Server) onPeerControlData(peerID string, data []byte) {
-	peer := s.getOrCreatePeerControlSession(peerID)
+	peer := s.getOrCreatePeerControlSession(peerID, data)
 	if peer == nil {
 		return
 	}
@@ -183,7 +185,7 @@ func (s *Server) onPeerControlData(peerID string, data []byte) {
 	}
 }
 
-func (s *Server) getOrCreatePeerControlSession(peerID string) *peerSession {
+func (s *Server) getOrCreatePeerControlSession(peerID string, data []byte) *peerSession {
 	if peerID == "" {
 		return nil
 	}
@@ -205,7 +207,13 @@ func (s *Server) getOrCreatePeerControlSession(peerID string) *peerSession {
 		}
 		peer = newPeerSession(peerID, true)
 	}
-	conn := muxconn.NewPeerControlUnbound(s.ln, s.keys, peerID)
+	keys := s.peerKeysLocked(peerID, peer, data, true)
+	if keys == nil {
+		s.sessMu.Unlock()
+		return nil
+	}
+	peer.keys = keys
+	conn := muxconn.NewPeerControlUnbound(s.ln, keys, peerID)
 	if conn == nil {
 		s.sessMu.Unlock()
 		return nil
@@ -304,15 +312,17 @@ func (s *Server) goTracked(fn func()) {
 }
 
 func (s *Server) onPeerData(peerID string, data []byte) {
-	peer := s.getPeerSession(peerID)
+	peer := s.getPeerSession(peerID, data)
 	if peer == nil {
-		s.onData(data)
+		if s.ring == nil {
+			s.onData(data)
+		}
 		return
 	}
 	tunnelcore.PushData(peer.dataConn(), data)
 }
 
-func (s *Server) getPeerSession(peerID string) *peerSession {
+func (s *Server) getPeerSession(peerID string, data []byte) *peerSession {
 	if peerID == "" || s.peerLn == nil {
 		return nil
 	}
@@ -326,7 +336,12 @@ func (s *Server) getPeerSession(peerID string) *peerSession {
 		s.sessMu.Unlock()
 		return nil
 	}
-	conn := muxconn.NewPeer(s.peerLn, s.keys, peerID)
+	keys := s.peerKeysLocked(peerID, peer, data, false)
+	if keys == nil {
+		s.sessMu.Unlock()
+		return nil
+	}
+	conn := muxconn.NewPeer(s.peerLn, keys, peerID)
 	session, err := tunnelcore.NewSession(conn, tunnelcore.ServerRole, runtime.SmuxConfigFor(s.ln))
 	if err != nil {
 		s.sessMu.Unlock()
@@ -337,6 +352,7 @@ func (s *Server) getPeerSession(peerID string) *peerSession {
 	if peer == nil {
 		_, needsControl := s.ln.(transport.PeerControlPlane)
 		peer = newPeerSession(peerID, needsControl)
+		peer.keys = keys
 		s.peerSessions[peerID] = peer
 	}
 	if !peer.attachData(conn, session) {
@@ -581,4 +597,85 @@ func (s *Server) stopping() bool {
 	default:
 		return false
 	}
+}
+
+// unknownPeerBackoff bounds how often records from a peer without a matching
+// key are re-checked against the ring.
+const unknownPeerBackoff = time.Second
+
+// keyRingPollInterval is how often crypto.keys_file is checked for changes.
+const keyRingPollInterval = 10 * time.Second
+
+// peerKeysLocked returns the key set for a peer: the shared key outside ring
+// mode, the key already bound to the peer, or the ring key that authenticates
+// this first record. It returns nil when no key matches. Callers hold sessMu.
+func (s *Server) peerKeysLocked(peerID string, peer *peerSession, data []byte, control bool) *crypto.KeySet {
+	if s.ring == nil {
+		return s.keys
+	}
+	if peer != nil && peer.keys != nil {
+		return peer.keys
+	}
+	s.unknownMu.Lock()
+	last, seen := s.unknownPeers[peerID]
+	s.unknownMu.Unlock()
+	if seen && time.Since(last) < unknownPeerBackoff {
+		return nil
+	}
+	ks := s.ring.Resolve(data, control)
+	s.unknownMu.Lock()
+	if ks == nil {
+		s.unknownPeers[peerID] = time.Now()
+	} else {
+		delete(s.unknownPeers, peerID)
+	}
+	s.unknownMu.Unlock()
+	return ks
+}
+
+// watchKeyRing reloads the keys file on change and closes sessions of peers
+// whose key was removed. A failed reload keeps the previous keys.
+func (s *Server) watchKeyRing(ctx context.Context) {
+	t := time.NewTicker(keyRingPollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.done:
+			return
+		case <-t.C:
+		}
+		removed, err := s.ring.Reload()
+		if err != nil {
+			logger.Warnf("keys file reload failed, keeping previous keys: %v", err)
+			continue
+		}
+		if len(removed) > 0 {
+			closed := s.revokePeers(removed)
+			logger.Infof("keys file reloaded: %d key(s) removed, %d session(s) closed, %d key(s) active",
+				len(removed), closed, s.ring.Len())
+		}
+	}
+}
+
+// revokePeers closes every peer session bound to one of the removed key sets
+// and returns how many it closed.
+func (s *Server) revokePeers(removed []*crypto.KeySet) int {
+	gone := make(map[*crypto.KeySet]bool, len(removed))
+	for _, ks := range removed {
+		gone[ks] = true
+	}
+	s.sessMu.RLock()
+	var victims []*peerSession
+	for _, p := range s.peerSessions {
+		if gone[p.keys] {
+			victims = append(victims, p)
+		}
+	}
+	s.sessMu.RUnlock()
+	for _, p := range victims {
+		s.removePeer(p, "key revoked")
+	}
+	return len(victims)
 }

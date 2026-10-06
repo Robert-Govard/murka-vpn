@@ -3,17 +3,20 @@ package server
 
 import (
 	"context"
+	crand "crypto/rand"
 	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/xtaci/smux"
 
 	"github.com/openlibrecommunity/olcrtc/internal/control"
 	"github.com/openlibrecommunity/olcrtc/internal/crypto"
 	"github.com/openlibrecommunity/olcrtc/internal/handshake"
+	"github.com/openlibrecommunity/olcrtc/internal/logger"
 	"github.com/openlibrecommunity/olcrtc/internal/muxconn"
 	"github.com/openlibrecommunity/olcrtc/internal/runtime"
 	"github.com/openlibrecommunity/olcrtc/internal/transport"
@@ -28,6 +31,9 @@ var (
 	ErrSocks5AuthFailed    = errors.New("SOCKS5 auth failed")
 	ErrSocks5ConnectFailed = errors.New("SOCKS5 connect failed")
 	ErrInvalidTarget       = errors.New("invalid connect target")
+	// ErrKeysFileNeedsPeerTransport is returned when crypto.keys_file is used
+	// with a transport that does not route traffic per peer.
+	ErrKeysFileNeedsPeerTransport = errors.New("crypto.keys_file requires a per-peer transport such as vp8channel")
 )
 
 // SessionOpenFunc is called after a successful handshake.
@@ -48,6 +54,7 @@ type Server struct {
 	ln      transport.Transport
 	peerLn  transport.PeerTransport
 	keys    *crypto.KeySet
+	ring    *KeyRing // non-nil in crypto.keys_file mode
 	pair    *tunnelcore.SessionPair
 	conn    *muxconn.Conn
 
@@ -59,6 +66,8 @@ type Server struct {
 	sessMu      sync.RWMutex
 
 	peerSessions map[string]*peerSession
+	unknownMu    sync.Mutex
+	unknownPeers map[string]time.Time // peerID -> last failed key lookup (ring mode)
 	// peerLimitWarn rate-limits the peer-cap warning.
 	peerLimitWarn atomic.Int64
 	peersMu       sync.Mutex
@@ -113,13 +122,40 @@ type Config struct {
 	OnHealth         HealthFunc
 }
 
+// setupServerKeys returns the key set for the broadcast link and, in
+// keys_file mode, the per-user ring. In ring mode the broadcast link gets a
+// random throwaway key, so only peer-routed clients holding a ring key can
+// reach the tunnel.
+func setupServerKeys(cfg Config) (*crypto.KeySet, *KeyRing, error) {
+	if cfg.KeysFile == "" {
+		keys, err := tunnelcore.SetupKeySet(cfg.KeyHex, crypto.Server)
+		if err != nil {
+			return nil, nil, fmt.Errorf("setup key set: %w", err)
+		}
+		return keys, nil, nil
+	}
+	ring, err := LoadKeyRing(cfg.KeysFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	var throwaway [32]byte
+	if _, err := crand.Read(throwaway[:]); err != nil {
+		return nil, nil, fmt.Errorf("throwaway key: %w", err)
+	}
+	keys, err := crypto.NewKeySet(throwaway[:], crypto.Server)
+	if err != nil {
+		return nil, nil, fmt.Errorf("setup key set: %w", err)
+	}
+	return keys, ring, nil
+}
+
 // Run starts the server with the given configuration.
 func Run(ctx context.Context, cfg Config) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	keys, err := tunnelcore.SetupKeySet(cfg.KeyHex, crypto.Server)
+	keys, ring, err := setupServerKeys(cfg)
 	if err != nil {
-		return fmt.Errorf("setup key set: %w", err)
+		return err
 	}
 	hook := cfg.AuthHook
 	if hook == nil {
@@ -138,7 +174,7 @@ func Run(ctx context.Context, cfg Config) error {
 		onTraffic = func(string, string, uint64, uint64) {}
 	}
 	s := &Server{
-		keys: keys, authHook: hook, onOpen: onOpen, onClose: onClose, onTraffic: onTraffic,
+		keys: keys, ring: ring, unknownPeers: make(map[string]time.Time), authHook: hook, onOpen: onOpen, onClose: onClose, onTraffic: onTraffic,
 		dnsServer: cfg.DNSServer, resolver: tunnelcore.Resolver(cfg.Resolver, cfg.DNSServer),
 		socksProxyAddr: cfg.SOCKSProxyAddr, socksProxyPort: cfg.SOCKSProxyPort,
 		socksProxyUser: cfg.SOCKSProxyUser, socksProxyPass: cfg.SOCKSProxyPass,
@@ -152,6 +188,13 @@ func Run(ctx context.Context, cfg Config) error {
 	}()
 	if err := s.bringUpLink(runCtx, cfg, cancel); err != nil {
 		return err
+	}
+	if s.ring != nil {
+		if s.peerLn == nil {
+			return ErrKeysFileNeedsPeerTransport
+		}
+		logger.Infof("keys file mode: %d key(s) from %s", s.ring.Len(), cfg.KeysFile)
+		s.goTracked(func() { s.watchKeyRing(runCtx) })
 	}
 	go func() {
 		<-runCtx.Done()
