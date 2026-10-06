@@ -30,6 +30,8 @@ var (
 	ErrCryptoKeyConflict = errors.New("crypto.key and crypto.key_file cannot both be set")
 	// ErrCryptoKeyFileEmpty is returned when crypto.key_file points to an empty file.
 	ErrCryptoKeyFileEmpty = errors.New("crypto key file is empty")
+	// ErrCryptoKeysFileConflict is returned when crypto.keys_file is combined with key or key_file.
+	ErrCryptoKeysFileConflict = errors.New("crypto.keys_file cannot be combined with crypto.key or crypto.key_file")
 )
 
 // Settings is the overridable part of the schema. The top-level file and every
@@ -95,8 +97,9 @@ type Room struct {
 
 // Crypto holds the shared secret used to authenticate and encrypt the tunnel.
 type Crypto struct {
-	Key     string `yaml:"key"`      // 64-char hex (32 bytes)
-	KeyFile string `yaml:"key_file"` // path to a file containing crypto.key
+	Key      string `yaml:"key"`       // 64-char hex (32 bytes)
+	KeyFile  string `yaml:"key_file"`  // path to a file containing crypto.key
+	KeysFile string `yaml:"keys_file"` // srv only: file with one key per line, reloaded live
 }
 
 // Net groups network and transport selection.
@@ -216,6 +219,10 @@ func Load(path string) (File, error) {
 }
 
 func loadExternalSecrets(configPath string, file *File) error {
+	if err := resolveKeysFile(configPath, &file.Crypto); err != nil {
+		return err
+	}
+
 	key, err := resolveKey(configPath, file.Crypto)
 	if err != nil {
 		return err
@@ -224,12 +231,34 @@ func loadExternalSecrets(configPath string, file *File) error {
 	file.Crypto.Key = key
 
 	for i := range file.Profiles {
+		if err := resolveKeysFile(configPath, &file.Profiles[i].Crypto); err != nil {
+			return fmt.Errorf("profiles[%d]: %w", i, err)
+		}
+
 		key, err := resolveKey(configPath, file.Profiles[i].Crypto)
 		if err != nil {
 			return fmt.Errorf("profiles[%d]: %w", i, err)
 		}
 
 		file.Profiles[i].Crypto.Key = key
+	}
+
+	return nil
+}
+
+// resolveKeysFile validates crypto.keys_file and makes it absolute relative
+// to the config file, the same way key_file is resolved.
+func resolveKeysFile(configPath string, c *Crypto) error {
+	if c.KeysFile == "" {
+		return nil
+	}
+
+	if c.Key != "" || c.KeyFile != "" {
+		return ErrCryptoKeysFileConflict
+	}
+
+	if !filepath.IsAbs(c.KeysFile) {
+		c.KeysFile = filepath.Join(filepath.Dir(configPath), c.KeysFile)
 	}
 
 	return nil
@@ -297,6 +326,7 @@ func ApplySettings(dst session.Config, s Settings) session.Config {
 	dst.RoomID = overlay(dst.RoomID, s.Room.ID)
 	dst.ChannelID = overlay(dst.ChannelID, s.Room.Channel)
 	dst.KeyHex = overlay(dst.KeyHex, s.Crypto.Key)
+	dst.KeysFile = overlay(dst.KeysFile, s.Crypto.KeysFile)
 
 	dst.SOCKSHost = overlay(dst.SOCKSHost, s.SOCKS.Host)
 	dst.SOCKSPort = overlay(dst.SOCKSPort, s.SOCKS.Port)

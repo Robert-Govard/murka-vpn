@@ -678,3 +678,31 @@ func TestGenUnsupportedProvider(t *testing.T) {
 		t.Fatalf("Gen(telemost) error = %v, want ErrUnsupportedProvider", err)
 	}
 }
+
+func TestValidateKeysFile(t *testing.T) {
+	RegisterDefaults()
+	srv := Config{
+		Mode:      ModeSrv,
+		Transport: transportVP8,
+		Provider:  "wbstream",
+		RoomID:    "room-1",
+		KeysFile:  "/tmp/room.keys",
+		DNSServer: "8.8.8.8:53",
+	}
+	if _, err := prepareRunConfig(srv); err != nil {
+		t.Fatalf("srv with keys_file: %v", err)
+	}
+
+	cnc := srv
+	cnc.Mode = ModeCnc
+	cnc.SOCKSHost, cnc.SOCKSPort = "127.0.0.1", 1080
+	if _, err := prepareRunConfig(cnc); !errors.Is(err, ErrKeysFileServerOnly) {
+		t.Fatalf("cnc with keys_file: err = %v, want %v", err, ErrKeysFileServerOnly)
+	}
+
+	both := srv
+	both.KeyHex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+	if _, err := prepareRunConfig(both); !errors.Is(err, ErrKeysFileConflict) {
+		t.Fatalf("key + keys_file: err = %v, want %v", err, ErrKeysFileConflict)
+	}
+}

@@ -53,6 +53,8 @@ var (
 	ErrTransportRequired    = errors.New(
 		"transport required (set transport to datachannel, videochannel, seichannel or vp8channel)")
 	ErrKeyRequired         = errors.New("key required (set crypto.key)")
+	ErrKeysFileServerOnly  = errors.New("crypto.keys_file is only supported in srv mode")
+	ErrKeysFileConflict    = errors.New("crypto.keys_file cannot be combined with crypto.key")
 	ErrDNSServerRequired   = errors.New("dns server required (set net.dns)")
 	ErrVideoWidthRequired  = errors.New("video width required for videochannel (set video.width)")
 	ErrVideoHeightRequired = errors.New("video height required for videochannel (set video.height)")
@@ -136,6 +138,7 @@ type Config struct {
 	RoomID                string
 	ChannelID             string
 	KeyHex                string
+	KeysFile              string
 	SOCKSHost             string
 	SOCKSPort             int
 	SOCKSUser             string

@@ -86,7 +86,7 @@ func validateCommon(cfg Config) error {
 	if cfg.RoomID == "" && cfg.Provider != providerNone {
 		return ErrRoomIDRequired
 	}
-	if err := validateKey(cfg.KeyHex); err != nil {
+	if err := validateKeyConfig(cfg); err != nil {
 		return err
 	}
 	if cfg.DNSServer == "" && cfg.Resolver == nil {
@@ -98,6 +98,20 @@ func validateCommon(cfg Config) error {
 // validateKey rejects a malformed PSK here rather than deep inside Run. The
 // failover supervisor restarts a profile forever, so a mistyped key would
 // otherwise turn into a silent restart loop instead of one startup error.
+// validateKeyConfig accepts either a single PSK or, on a server, a keys file.
+func validateKeyConfig(cfg Config) error {
+	if cfg.KeysFile == "" {
+		return validateKey(cfg.KeyHex)
+	}
+	if cfg.Mode != ModeSrv {
+		return ErrKeysFileServerOnly
+	}
+	if cfg.KeyHex != "" {
+		return ErrKeysFileConflict
+	}
+	return nil
+}
+
 func validateKey(keyHex string) error {
 	if keyHex == "" {
 		return ErrKeyRequired

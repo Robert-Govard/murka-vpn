@@ -406,3 +406,39 @@ func TestLoadInvalidUTF8(t *testing.T) {
 		t.Fatalf("Load() error = %v, want invalid UTF-8 error", err)
 	}
 }
+
+func TestLoadKeysFileRelativeToConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "olcrtc.yaml")
+	body := `
+mode: srv
+crypto:
+  keys_file: room.keys
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := filepath.Join(dir, "room.keys"); f.Crypto.KeysFile != want {
+		t.Fatalf("Crypto.KeysFile = %q, want %q", f.Crypto.KeysFile, want)
+	}
+}
+
+func TestLoadKeysFileConflictsWithKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "olcrtc.yaml")
+	body := `
+crypto:
+  key: ` + testCryptoKey + `
+  keys_file: room.keys
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := Load(path); !errors.Is(err, ErrCryptoKeysFileConflict) {
+		t.Fatalf("Load err = %v, want ErrCryptoKeysFileConflict", err)
+	}
+}

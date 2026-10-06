@@ -92,6 +92,7 @@ type Config struct {
 	RoomURL          string
 	ChannelID        string
 	KeyHex           string
+	KeysFile         string
 	DNSServer        string
 	Resolver         *net.Resolver
 	SOCKSProxyAddr   string
