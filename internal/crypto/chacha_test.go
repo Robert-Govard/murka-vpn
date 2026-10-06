@@ -318,3 +318,29 @@ func BenchmarkRecordRoundTrip(b *testing.B) {
 		}
 	}
 }
+
+func TestReplayWindowAcceptsWideReorder(t *testing.T) {
+	var r replayCache
+	r.senders = make(map[[noncePrefixSize]byte]*replayState)
+	var p [noncePrefixSize]byte
+	if err := r.accept(p, 5000); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	// 4000 behind the highest: valid reorder across planes, must pass once.
+	if err := r.accept(p, 1000); err != nil {
+		t.Fatalf("reordered: %v", err)
+	}
+	if err := r.accept(p, 1000); !errors.Is(err, ErrReplayDuplicate) {
+		t.Fatalf("duplicate: got %v", err)
+	}
+	// Advance past the window: old slots must be cleared, not reported as seen.
+	if err := r.accept(p, 5000+replayWindowSize); err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if err := r.accept(p, 5001); err != nil {
+		t.Fatalf("slot reuse after advance: %v", err)
+	}
+	if err := r.accept(p, 5000); !errors.Is(err, ErrReplayTooOld) {
+		t.Fatalf("too old: got %v", err)
+	}
+}

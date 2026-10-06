@@ -29,8 +29,13 @@ const (
 	recordMagic         = "OLC2"
 	noncePrefixSize     = chacha20poly1305.NonceSizeX - 8
 	recordHeaderSize    = len(recordMagic) + 8 + noncePrefixSize
-	replayWindowSize    = 64
-	maxReplaySenders    = 256
+	// One sender counter is shared by every muxconn plane (data, control,
+	// peer), and those planes are delivered by independent KCP sessions, so
+	// records legitimately arrive far out of order under load. A 64-record
+	// window rejected them as too old and tore the tunnel down.
+	replayWindowSize  = 8192
+	replayWindowWords = replayWindowSize / 64
+	maxReplaySenders  = 256
 
 	// WireOverhead is magic, counter, sender prefix, and authentication tag.
 	WireOverhead = recordHeaderSize + chacha20poly1305.Overhead
@@ -103,7 +108,7 @@ type sealState struct {
 type replayState struct {
 	prefix  [noncePrefixSize]byte
 	highest uint64
-	seen    uint64
+	seen    [replayWindowWords]uint64 // ring bitmap indexed by counter % window
 	element *list.Element
 }
 
@@ -266,27 +271,47 @@ func (r *replayCache) accept(prefix [noncePrefixSize]byte, counter uint64) error
 		return nil
 	}
 	if counter > state.highest {
-		shift := counter - state.highest
-		if shift >= replayWindowSize {
-			state.seen = 1
+		if counter-state.highest >= replayWindowSize {
+			state.seen = [replayWindowWords]uint64{}
 		} else {
-			state.seen = state.seen<<shift | 1
+			for c := state.highest + 1; c < counter; c++ {
+				state.clear(c)
+			}
 		}
 		state.highest = counter
+		state.mark(counter)
 		r.lru.MoveToFront(state.element)
 		return nil
 	}
-	age := state.highest - counter
-	if age >= replayWindowSize {
+	if state.highest-counter >= replayWindowSize {
 		return ErrReplayTooOld
 	}
-	mask := uint64(1) << age
-	if state.seen&mask != 0 {
+	if state.has(counter) {
 		return ErrReplayDuplicate
 	}
-	state.seen |= mask
+	state.mark(counter)
 	r.lru.MoveToFront(state.element)
 	return nil
+}
+
+func replayBit(counter uint64) (int, uint64) {
+	i := counter % replayWindowSize
+	return int(i / 64), uint64(1) << (i % 64)
+}
+
+func (s *replayState) has(counter uint64) bool {
+	w, m := replayBit(counter)
+	return s.seen[w]&m != 0
+}
+
+func (s *replayState) mark(counter uint64) {
+	w, m := replayBit(counter)
+	s.seen[w] |= m
+}
+
+func (s *replayState) clear(counter uint64) {
+	w, m := replayBit(counter)
+	s.seen[w] &^= m
 }
 
 func (r *replayCache) insert(prefix [noncePrefixSize]byte, counter uint64) {
@@ -298,7 +323,8 @@ func (r *replayCache) insert(prefix [noncePrefixSize]byte, counter uint64) {
 		}
 		r.lru.Remove(oldest)
 	}
-	state := &replayState{prefix: prefix, highest: counter, seen: 1}
+	state := &replayState{prefix: prefix, highest: counter}
+	state.mark(counter)
 	state.element = r.lru.PushFront(state)
 	r.senders[prefix] = state
 }
