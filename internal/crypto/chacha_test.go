@@ -344,3 +344,41 @@ func TestReplayWindowAcceptsWideReorder(t *testing.T) {
 		t.Fatalf("too old: got %v", err)
 	}
 }
+
+func TestAuthenticateDoesNotConsumeRecord(t *testing.T) {
+	psk := bytes.Repeat([]byte{7}, 32)
+	client, err := NewKeySet(psk, Client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewKeySet(psk, Server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := NewKeySet(bytes.Repeat([]byte{9}, 32), Server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aad := []byte("aad")
+	record, err := client.SealInto(nil, []byte("hello"), aad)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !server.Authenticate(record, aad) {
+		t.Fatal("Authenticate rejected a valid record")
+	}
+	if other.Authenticate(record, aad) {
+		t.Fatal("Authenticate accepted a record under the wrong key")
+	}
+	if server.Authenticate(record, []byte("other-aad")) {
+		t.Fatal("Authenticate accepted a record with the wrong aad")
+	}
+	if server.Authenticate(record[:WireOverhead-1], aad) {
+		t.Fatal("Authenticate accepted a truncated record")
+	}
+	// The probe must not have touched replay state.
+	if _, err := server.Open(record, aad); err != nil {
+		t.Fatalf("Open after Authenticate: %v", err)
+	}
+}

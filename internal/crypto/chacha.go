@@ -262,6 +262,26 @@ func (k *KeySet) OpenInto(dst, record, aad []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
+// Authenticate reports whether record is a well-formed v2 record that
+// authenticates under k's receive key with aad. Unlike Open it never touches
+// the replay window, so a successful probe does not consume the record. The
+// server uses it to pick a per-user key for a peer's first record.
+func (k *KeySet) Authenticate(record, aad []byte) bool {
+	if len(record) < WireOverhead || string(record[:len(recordMagic)]) != recordMagic {
+		return false
+	}
+	counter := binary.BigEndian.Uint64(record[len(recordMagic):])
+	if counter == 0 {
+		return false
+	}
+	nonce := acquireNonce()
+	copy(nonce[:noncePrefixSize], record[len(recordMagic)+8:recordHeaderSize])
+	binary.BigEndian.PutUint64(nonce[noncePrefixSize:], counter)
+	_, err := k.receive.Open(nil, nonce[:], record[recordHeaderSize:], aad)
+	noncePool.Put(nonce)
+	return err == nil
+}
+
 func (r *replayCache) accept(prefix [noncePrefixSize]byte, counter uint64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
