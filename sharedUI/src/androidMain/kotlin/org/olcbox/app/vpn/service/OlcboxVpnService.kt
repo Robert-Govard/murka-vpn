@@ -36,6 +36,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import mobile.LogWriter
 import mobile.Mobile
 import mobile.SocketProtector
+import org.olcbox.app.data.xray.XrayConfig
+import org.olcbox.app.vpn.XrayCore
 import org.olcbox.app.data.TUN2SOCKS_CONFIG_FILE_NAME
 import org.olcbox.app.vpn.awaitRuntimeReady
 import org.olcbox.app.data.datasource.LocationsDataSourceImpl
@@ -77,6 +79,8 @@ class OlcboxVpnService : VpnService() {
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Default + job)
     @Volatile private var olcRtcRuntime = Mobile.new_()
+    private val xrayCore by lazy { XrayCore(applicationContext) }
+    @Volatile private var activeCoreIsXray = false
     private var lastMobileRoom = ""
     private var lastStoppedJitsiRoom = ""
     private val tunnelMutex = Mutex()
@@ -228,7 +232,7 @@ class OlcboxVpnService : VpnService() {
 
                 is VpnStatus.Reconnecting -> {
                     if (isBenignWifiRefresh(previousTransport, nextTransport) &&
-                        olcRtcRuntime.isRunning &&
+                        coreRunning() &&
                         canReconnectTransportInPlace()
                     ) {
                         setStatus(VpnStatus.Connected)
@@ -574,8 +578,10 @@ class OlcboxVpnService : VpnService() {
         requestedGeneration: Long,
         setErrorOnFailure: Boolean
     ): Boolean {
-        val keepProcessBound = shouldKeepProcessBound(upstream)
         val config = location.normalized()
+        if (config.isXray) return startXray(config, upstream, requestedGeneration, setErrorOnFailure)
+        activeCoreIsXray = false
+        val keepProcessBound = shouldKeepProcessBound(upstream)
         return try {
             installMobileCallbacks()
             val targetSocksPort = socksListenPort
@@ -639,6 +645,72 @@ class OlcboxVpnService : VpnService() {
             }
         }
     }
+
+    /** Remnawave location: Xray serves the same local SOCKS port that tun2socks uses. */
+    private suspend fun startXray(
+        config: LocationConfig,
+        upstream: Network,
+        requestedGeneration: Long,
+        setErrorOnFailure: Boolean
+    ): Boolean {
+        val targetSocksPort = socksListenPort
+        return try {
+            waitForSocksPortReleased(targetSocksPort, SOCKS_RELEASE_QUICK_TIMEOUT_MS)
+            if (isLocalSocksPortOpen(targetSocksPort)) {
+                throw IllegalStateException("SOCKS port $targetSocksPort is still in use")
+            }
+            bindProcessToNetwork(upstream, "Bound to ${getNetName(upstream)}")
+            coroutineContext.ensureActive()
+            val prepared = XrayConfig.prepare(
+                raw = config.xrayConfig,
+                socksHost = socksListenHost,
+                socksPort = targetSocksPort,
+                username = socksUsername,
+                password = socksPassword
+            )
+            addLog("Starting Xray ${config.providerName()} ${config.transportName()} for ${config.displayName()}")
+            activeCoreIsXray = true
+            withContext(Dispatchers.IO) {
+                xrayCore.start(prepared) { fd -> protect(fd) }
+            }
+            val deadline = System.currentTimeMillis() + MOBILE_READY_TIMEOUT_MS
+            while (!isLocalSocksPortOpen(targetSocksPort)) {
+                if (System.currentTimeMillis() > deadline) {
+                    throw IllegalStateException("Xray did not open SOCKS port $targetSocksPort")
+                }
+                delay(XRAY_READY_POLL_MS)
+            }
+            if (requestedGeneration != generation) {
+                addLog("Xray start superseded")
+                return false
+            }
+            addLog("Xray ready on $socksListenHost:$targetSocksPort")
+            markRtcConnected()
+            true
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) {
+                addLog("Xray start canceled")
+                stopMobileAndWait()
+            }
+            throw e
+        } catch (e: Exception) {
+            val message = e.message ?: "Xray failed"
+            addLog("Xray start failed: $message")
+            stopMobileAndWait()
+            if (requestedGeneration == generation && setErrorOnFailure) {
+                setStatus(VpnStatus.Error(message))
+                updateNotification("Connection failed")
+            }
+            false
+        } finally {
+            // Xray sockets are protected; the process does not need to stay bound.
+            unbindProcessFromNetwork()
+        }
+    }
+
+    /** Whether the core of the active location (olcRTC or Xray) is running. */
+    private fun coreRunning(): Boolean =
+        if (activeCoreIsXray) xrayCore.isRunning else olcRtcRuntime.isRunning
 
     private suspend fun waitForJitsiRoomCleanup(provider: String, room: String) {
         if (LocationConfig.normalizeProvider(provider) != LocationConfig.PROVIDER_JITSI) return
@@ -849,9 +921,10 @@ class OlcboxVpnService : VpnService() {
             while (isActive && OlcboxVpnState.status.value is VpnStatus.Connected) {
                 delay(WATCHDOG_INTERVAL_MS)
                 when {
-                    !olcRtcRuntime.isRunning -> {
-                        addLog("Watchdog: olcRTC stopped")
-                        requestTransportRecovery("olcRTC stopped", fullRestart = false)
+                    !coreRunning() -> {
+                        val core = if (activeCoreIsXray) "Xray" else "olcRTC"
+                        addLog("Watchdog: $core stopped")
+                        requestTransportRecovery("$core stopped", fullRestart = false)
                         return@launch
                     }
 
@@ -1012,6 +1085,7 @@ class OlcboxVpnService : VpnService() {
     }
 
     private fun stopMobile() {
+        xrayCore.stop()
         val runtime = olcRtcRuntime
         val provider = lastMobileProvider
         val room = lastMobileRoom
@@ -1152,7 +1226,7 @@ class OlcboxVpnService : VpnService() {
 
         val txDelta = stats.txPackets - previous.txPackets
         val rxDelta = stats.rxPackets - previous.rxPackets
-        if (txDelta >= WATCHDOG_STALLED_TX_PACKET_DELTA && rxDelta <= 0L && olcRtcRuntime.isRunning) {
+        if (txDelta >= WATCHDOG_STALLED_TX_PACKET_DELTA && rxDelta <= 0L && coreRunning()) {
             watchdogStalledSamples++
         } else if (rxDelta > 0L || txDelta <= 0L) {
             watchdogStalledSamples = 0
@@ -1288,7 +1362,7 @@ class OlcboxVpnService : VpnService() {
     private fun canReconnectTransportInPlace(): Boolean {
         return when (connectionMode) {
             AndroidConnectionMode.Tun -> vpnInterface != null && tun2socksThread?.isAlive == true
-            AndroidConnectionMode.Proxy -> olcRtcRuntime.isRunning
+            AndroidConnectionMode.Proxy -> coreRunning()
         }
     }
 
@@ -1306,7 +1380,7 @@ class OlcboxVpnService : VpnService() {
             vpnInterface != null ||
             tun2socksThread != null ||
             socksProxy != null ||
-            olcRtcRuntime.isRunning
+            coreRunning()
     }
 
     private fun registerNetworkMonitor() {
@@ -1693,6 +1767,7 @@ class OlcboxVpnService : VpnService() {
         private const val LOCAL_SOCKS_PORT_BASE = 10818
         private const val LOCAL_SOCKS_PORT_MAX = 10858
         private const val MOBILE_READY_TIMEOUT_MS = 60_000L
+        private const val XRAY_READY_POLL_MS = 100L
         private const val MOBILE_STOP_TIMEOUT_MS = 5_000L
         private const val PREVIOUS_STOP_WAIT_MS = 12_000L
         private const val JITSI_RESTART_SETTLE_MS = 2_000L
