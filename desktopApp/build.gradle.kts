@@ -114,7 +114,7 @@ val olcrtcRepoDir = olcrtcRepo.map { rootProject.file(it) }
 val generatedNativeResources = layout.buildDirectory.dir("generated/desktopNativeResources")
 val hevSocks5TunnelSourceDir = rootProject.layout.projectDirectory.dir("androidApp/src/main/jni/hev-socks5-tunnel")
 val currentBuildOs = OperatingSystem.current()
-val desktopPackageName = "Olcbox"
+val desktopPackageName = "MurkaVPN"
 val desktopPackageVersion = providers.gradleProperty("olcbox.version").orElse("1.0.0").get()
 val tun2SocksVersion = "2.6.0"
 val wintunVersion = "0.14.1"
@@ -538,20 +538,20 @@ compose.desktop {
             }
             windows {
                 iconFile.set(project.file("appIcons/WindowsIcon.ico"))
-                menuGroup = "Olcbox"
+                menuGroup = "Мурка VPN"
                 shortcut = true
                 dirChooser = true
-                upgradeUuid = "6f0aaf78-dbed-4745-9d95-9e63f10a30de"
+                upgradeUuid = "68ff6308-ce5e-434d-b3d0-87113b74c57c"
             }
             macOS {
                 iconFile.set(project.file("appIcons/MacosIcon.icns"))
-                bundleID = "org.olcbox.app.desktopApp"
+                bundleID = "com.murkavpn.app.desktop"
                 infoPlist {
                     extraKeysRawXml = """
                         <key>CFBundleURLTypes</key>
                         <array><dict>
-                            <key>CFBundleURLName</key><string>org.olcbox.app.import</string>
-                            <key>CFBundleURLSchemes</key><array><string>olcbox</string></array>
+                            <key>CFBundleURLName</key><string>com.murkavpn.app.import</string>
+                            <key>CFBundleURLSchemes</key><array><string>murka</string></array>
                         </dict></array>
                     """.trimIndent()
                 }

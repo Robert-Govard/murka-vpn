@@ -86,8 +86,8 @@ class DesktopDeepLinks private constructor(
                 directory.resolve("deep-links.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE
             )
             val endpoint = directory.resolve("deep-links.endpoint")
-            val argument = args.firstOrNull { it.startsWith("olcbox:", ignoreCase = true) }.orEmpty()
-            val uri = if (argument.length <= ImportDeepLink.MAX_LENGTH) argument else "olcbox://invalid"
+            val argument = args.firstOrNull { it.startsWith("murka:", ignoreCase = true) || it.startsWith("olcbox:", ignoreCase = true) }.orEmpty()
+            val uri = if (argument.length <= ImportDeepLink.MAX_LENGTH) argument else "murka://invalid"
             val deadline = System.nanoTime() + 5_000_000_000L
             try {
                 do {
@@ -155,13 +155,13 @@ object DesktopDeepLinkRegistration {
         val path = Path.of(executable).toAbsolutePath()
         // A Gradle/IDE JVM is not a usable application launcher.
         if (System.getenv("APPIMAGE").isNullOrBlank() &&
-            !path.fileName.toString().equals("Olcbox", ignoreCase = true) &&
-            !path.fileName.toString().equals("Olcbox.exe", ignoreCase = true)) return
+            !path.fileName.toString().equals("MurkaVPN", ignoreCase = true) &&
+            !path.fileName.toString().equals("MurkaVPN.exe", ignoreCase = true)) return
         runCatching {
             when (DesktopPaths.os) {
                 DesktopOs.Windows -> {
-                    val key = "HKCU\\Software\\Classes\\olcbox"
-                    command("reg.exe", "add", key, "/ve", "/d", "URL:Olcbox subscription", "/f")
+                    val key = "HKCU\\Software\\Classes\\murka"
+                    command("reg.exe", "add", key, "/ve", "/d", "URL:Мурка VPN subscription", "/f")
                     command("reg.exe", "add", key, "/v", "URL Protocol", "/d", "", "/f")
                     command("reg.exe", "add", "$key\\shell\\open\\command", "/ve", "/d", "\"$path\" \"%1\"", "/f")
                 }
@@ -170,13 +170,13 @@ object DesktopDeepLinkRegistration {
                         ?.let(Path::of) ?: Path.of(System.getProperty("user.home"), ".local", "share")
                     val applications = dataHome.resolve("applications")
                     Files.createDirectories(applications)
-                    val id = "org.olcbox.app.desktopApp.desktop"
+                    val id = "com.murkavpn.app.desktop.desktop"
                     Files.writeString(applications.resolve(id), linuxDesktopEntry(path.toString()))
-                    command("xdg-mime", "default", id, "x-scheme-handler/olcbox")
+                    command("xdg-mime", "default", id, "x-scheme-handler/murka")
                 }
                 else -> Unit
             }
-        }.onFailure { System.err.println("Could not register olcbox:// links for this user") }
+        }.onFailure { System.err.println("Could not register murka:// links for this user") }
     }
 
     internal fun linuxDesktopEntry(executable: String): String {
@@ -196,12 +196,12 @@ object DesktopDeepLinkRegistration {
         return """
             [Desktop Entry]
             Type=Application
-            Name=Olcbox
+            Name=Мурка VPN
             Exec=$quoted %u
-            Icon=olcbox
+            Icon=murkavpn
             Categories=Network;Utility;
             Terminal=false
-            MimeType=x-scheme-handler/olcbox;
+            MimeType=x-scheme-handler/murka;
         """.trimIndent() + "\n"
     }
 

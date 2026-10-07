@@ -210,7 +210,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                             updateMessage = "${info.channel.name} update found: ${info.version}"
                         } else {
                             updateOffer = null
-                            updateMessage = "Olcbox is up to date"
+                            updateMessage = "Мурка VPN is up to date"
                         }
                     } else {
                         updateOffer = null
@@ -276,7 +276,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
     Tray(
         state = trayState,
         icon = painterResource("LinuxIcon.png"),
-        tooltip = "Olcbox",
+        tooltip = "Мурка VPN",
         menu = {
             Item("Open", onClick = { isWindowVisible = true })
             Item(
@@ -299,7 +299,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
     )
 
     Window(
-        title = "olcbox",
+        title = "Мурка VPN",
         visible = isWindowVisible,
         state = rememberWindowState(width = 430.dp, height = 780.dp),
         onCloseRequest = {

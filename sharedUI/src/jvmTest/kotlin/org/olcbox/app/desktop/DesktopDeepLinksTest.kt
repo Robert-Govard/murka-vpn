@@ -15,7 +15,7 @@ class DesktopDeepLinksTest {
     fun coldLaunchAndSecondLaunchReachTheSameReceiver() = runBlocking<Unit> {
         val directory = Files.createTempDirectory("olcbox-deep-link-test")
         val first = "olcbox://add?url=https%3A%2F%2Fexample.org%2Ffirst"
-        val second = "olcbox://add?url=https%3A%2F%2Fexample.org%2Fsecond"
+        val second = "murka://add?url=https%3A%2F%2Fexample.org%2Fsecond"
         try {
             DesktopDeepLinks.open(arrayOf(first), directory)!!.use { app ->
                 assertEquals(first, withTimeout(2_000) { app.events.first() })
@@ -34,6 +34,6 @@ class DesktopDeepLinksTest {
     fun desktopEntryPassesUrlAsOneArgumentAndEscapesLauncherPath() {
         val entry = DesktopDeepLinkRegistration.linuxDesktopEntry("/home/user/My Apps/Olcbox 100%.AppImage")
         assertTrue("Exec=\"/home/user/My Apps/Olcbox 100%%.AppImage\" %u\n" in entry)
-        assertTrue("MimeType=x-scheme-handler/olcbox;" in entry)
+        assertTrue("MimeType=x-scheme-handler/murka;" in entry)
     }
 }

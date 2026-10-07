@@ -29,13 +29,13 @@ internal object DesktopPaths {
     fun appDataDir(): Path {
         val home = Path(System.getProperty("user.home"))
         val dir = when (os) {
-            DesktopOs.MacOS -> home.resolve("Library").resolve("Application Support").resolve("Olcbox")
+            DesktopOs.MacOS -> home.resolve("Library").resolve("Application Support").resolve("MurkaVPN")
             DesktopOs.Windows -> {
                 val appData = System.getenv("APPDATA")?.takeIf { it.isNotBlank() }
-                (appData?.let { Path(it) } ?: home.resolve("AppData").resolve("Roaming")).resolve("Olcbox")
+                (appData?.let { Path(it) } ?: home.resolve("AppData").resolve("Roaming")).resolve("MurkaVPN")
             }
             DesktopOs.Linux,
-            DesktopOs.Other -> home.resolve(".olcbox")
+            DesktopOs.Other -> home.resolve(".murkavpn")
         }
         Files.createDirectories(dir)
         return dir
