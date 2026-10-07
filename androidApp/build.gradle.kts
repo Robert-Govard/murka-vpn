@@ -127,3 +127,18 @@ dependencies {
     implementation(libs.androidx.activityCompose)
     implementation(libs.androidx.datastore.preferences)
 }
+
+// Murka VPN: Xray routing rules from Remnawave need geoip.dat and geosite.dat.
+val xrayGeoAssetsDir = layout.projectDirectory.dir("src/main/assets/xray")
+val checkXrayGeoAssets by tasks.registering {
+    val dir = xrayGeoAssetsDir.asFile
+    doLast {
+        val missing = listOf("geoip.dat", "geosite.dat").filterNot { dir.resolve(it).isFile }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "Missing Xray assets $missing in $dir. Run scripts/fetch-xray-assets.sh first."
+            )
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(checkXrayGeoAssets) }

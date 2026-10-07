@@ -43,3 +43,6 @@ keystore.properties
 release-keystore.jks
 .!80165!.DS_Store
 .zed
+
+# Xray geo databases, fetched by scripts/fetch-xray-assets.sh
+/androidApp/src/main/assets/xray/

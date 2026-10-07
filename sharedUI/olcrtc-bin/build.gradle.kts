@@ -3,6 +3,13 @@ val olcrtcRepoPath = providers.environmentVariable("OLCRTC_REPO")
 val olcrtcRepoDir = rootProject.file(olcrtcRepoPath.get())
 val olcrtcAndroidAarFile = layout.buildDirectory.file("olcrtc.aar").get().asFile
 
+// Murka VPN: one gomobile AAR with both cores (olcRTC + Xray). Android can
+// load a single Go runtime per app, so murka-core binds olcrtc/mobile and its
+// own xraymobile package together. murka-core takes olcRTC from ../olcrtc.
+val murkaCoreRepoPath = providers.environmentVariable("MURKA_CORE_REPO")
+    .orElse(rootProject.layout.projectDirectory.asFile.parentFile.resolve("murka-core").absolutePath)
+val murkaCoreRepoDir = rootProject.file(murkaCoreRepoPath.get())
+
 val gomobileExecutable = providers.environmentVariable("GOMOBILE_PATH")
     .orElse(
         providers.systemProperty("user.home")
@@ -11,14 +18,16 @@ val gomobileExecutable = providers.environmentVariable("GOMOBILE_PATH")
 
 val buildOlcrtcAndroidAar by tasks.registering(Exec::class) {
     group = "build"
-    description = "Builds olcrtc Android AAR from OLCRTC_REPO using gomobile."
+    description = "Builds the olcrtc + xray Android AAR from MURKA_CORE_REPO using gomobile."
     inputs.dir(olcrtcRepoDir.resolve("mobile"))
     inputs.dir(olcrtcRepoDir.resolve("internal"))
     inputs.dir(olcrtcRepoDir.resolve("pkg"))
     inputs.files(olcrtcRepoDir.resolve("go.mod"), olcrtcRepoDir.resolve("go.sum"))
+    inputs.dir(murkaCoreRepoDir.resolve("xraymobile"))
+    inputs.files(murkaCoreRepoDir.resolve("go.mod"), murkaCoreRepoDir.resolve("go.sum"))
     outputs.file(olcrtcAndroidAarFile)
 
-    workingDir = olcrtcRepoDir
+    workingDir = murkaCoreRepoDir
     
     // Ensure Go is in PATH for gomobile bind
     val path = System.getenv("PATH") ?: ""
@@ -30,7 +39,8 @@ val buildOlcrtcAndroidAar by tasks.registering(Exec::class) {
     commandLine(
         gomobileExecutable, "bind", "-target=android/arm,android/arm64,android/amd64",
         "-androidapi", "21", "-ldflags", "-s -w -checklinkname=0",
-        "-o", olcrtcAndroidAarFile.absolutePath, "./mobile"
+        "-o", olcrtcAndroidAarFile.absolutePath,
+        "github.com/openlibrecommunity/olcrtc/mobile", "./xraymobile"
     )
 }
 
