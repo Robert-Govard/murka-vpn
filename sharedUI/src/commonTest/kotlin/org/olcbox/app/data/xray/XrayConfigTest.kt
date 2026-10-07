@@ -73,6 +73,33 @@ class XrayConfigTest {
     }
 
     @Test
+    fun prepareBindsEveryOutboundToInterface() {
+        val raw = """{"outbounds":[
+            {"tag":"proxy","protocol":"vless","streamSettings":{"network":"tcp","security":"reality",
+             "realitySettings":{"serverName":"x"},"sockopt":{"mark":7}}},
+            {"tag":"direct","protocol":"freedom"},
+            {"tag":"block","protocol":"blackhole"}]}"""
+        val out = json.parseToJsonElement(XrayConfig.prepare(raw, "127.0.0.1", 1080, "", "", bindInterface = "Ethernet")).jsonObject
+        val outbounds = out["outbounds"]!!.jsonArray.map { it.jsonObject }
+        for (o in outbounds) {
+            val sockopt = o["streamSettings"]!!.jsonObject["sockopt"]!!.jsonObject
+            assertEquals("Ethernet", sockopt["interface"]!!.jsonPrimitive.content)
+        }
+        val proxyStream = outbounds[0]["streamSettings"]!!.jsonObject
+        assertEquals("reality", proxyStream["security"]!!.jsonPrimitive.content)
+        assertEquals("x", proxyStream["realitySettings"]!!.jsonObject["serverName"]!!.jsonPrimitive.content)
+        assertEquals(7, proxyStream["sockopt"]!!.jsonObject["mark"]!!.jsonPrimitive.int)
+    }
+
+    @Test
+    fun prepareWithoutInterfaceLeavesOutboundsAlone() {
+        val raw = XrayConfig.parseSubscription(REMNAWAVE)!![0].config
+        val before = json.parseToJsonElement(raw).jsonObject["outbounds"]
+        val after = json.parseToJsonElement(XrayConfig.prepare(raw, "127.0.0.1", 1080, "", "")).jsonObject["outbounds"]
+        assertEquals(before, after)
+    }
+
+    @Test
     fun forCheckDropsRoutingSoNoGeoAssetsAreNeeded() {
         val raw = XrayConfig.parseSubscription(REMNAWAVE)!![0].config
         val out = json.parseToJsonElement(XrayConfig.forCheck(raw)).jsonObject

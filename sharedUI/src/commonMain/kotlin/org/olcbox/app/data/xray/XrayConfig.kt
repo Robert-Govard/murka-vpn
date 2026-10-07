@@ -2,6 +2,7 @@ package org.olcbox.app.data.xray
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -45,10 +46,23 @@ object XrayConfig {
     /**
      * Turns a stored server config into the config Xray runs: one local SOCKS
      * inbound for the tunnel, service sections removed, routing/dns/outbounds kept.
+     * [bindInterface] pins every outbound to a physical interface, so that Xray's
+     * own traffic does not loop back into a desktop TUN that captures all routes.
      */
-    fun prepare(raw: String, socksHost: String, socksPort: Int, username: String, password: String): String {
+    fun prepare(
+        raw: String,
+        socksHost: String,
+        socksPort: Int,
+        username: String,
+        password: String,
+        bindInterface: String? = null
+    ): String {
         val root = json.parseToJsonElement(raw).jsonObject
         val out = root.toMutableMap()
+        if (!bindInterface.isNullOrBlank()) {
+            val outbounds = root["outbounds"] as? JsonArray
+            if (outbounds != null) out["outbounds"] = JsonArray(outbounds.map { it.withInterface(bindInterface) })
+        }
         SERVICE_SECTIONS.forEach { out.remove(it) }
         out["log"] = buildJsonObject { put("loglevel", "warning") }
         out["inbounds"] = buildJsonArray {
@@ -118,6 +132,17 @@ object XrayConfig {
             ?.let { if (it == "tls") "TLS" else it.replaceFirstChar(Char::uppercaseChar) }
         protocol to listOfNotNull(network, security).joinToString(" · ")
     }.getOrDefault("Xray" to "")
+
+    private fun JsonElement.withInterface(name: String): JsonElement {
+        val outbound = this as? JsonObject ?: return this
+        val stream = (outbound["streamSettings"] as? JsonObject).orEmpty().toMutableMap()
+        val sockopt = (stream["sockopt"] as? JsonObject).orEmpty().toMutableMap()
+        sockopt["interface"] = JsonPrimitive(name)
+        stream["sockopt"] = JsonObject(sockopt)
+        return JsonObject(outbound + ("streamSettings" to JsonObject(stream)))
+    }
+
+    private fun JsonObject?.orEmpty(): Map<String, JsonElement> = this ?: emptyMap()
 
     private fun JsonObject.string(name: String): String? = (this[name] as? JsonPrimitive)?.contentOrNull
 }
