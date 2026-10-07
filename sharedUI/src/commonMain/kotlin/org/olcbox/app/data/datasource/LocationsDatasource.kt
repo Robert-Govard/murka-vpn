@@ -1,5 +1,9 @@
 package org.olcbox.app.data.datasource
 
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
+import org.olcbox.app.data.model.formatTrafficBytes
+import org.olcbox.app.data.xray.XrayConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
@@ -81,7 +85,9 @@ class LocationsRepositoryImpl(
 
     private data class DownloadedSubscription(
         val content: String,
-        val updateIntervalMs: Long?
+        val updateIntervalMs: Long?,
+        val profileTitle: String? = null,
+        val userInfo: String? = null
     )
 
     private data class ParsedImport(
@@ -536,6 +542,14 @@ class LocationsRepositoryImpl(
         }
 
         var parsed = parseImportSource(source, fallbackSubscriptionInterval)
+        if (parsed == null && input.isHttpUrl()) {
+            resolveRemnawaveImport(
+                url = input,
+                fallbackSubscriptionInterval = fallbackSubscriptionInterval,
+                subscriptionProxy = subscriptionProxy,
+                allowInsecureRequests = allowInsecureRequests
+            )?.let { return ResolvedImportResult.Success(it) }
+        }
         if (parsed == null && input.isHttpUrl() && source.requestMode != SubscriptionRequestMode.Compatibility) {
             when (
                 val fallbackSource = resolveImportSourceDetailed(
@@ -578,7 +592,15 @@ class LocationsRepositoryImpl(
             source.updateIntervalMs
         ) ?: return null
         if (source.subscriptionUrl == null) return parsed
+        return applySubscriptionDefaults(parsed, source, fallbackSubscriptionInterval)
+    }
 
+    /** Sets the refresh interval and request security on every entry of a subscription import. */
+    private fun applySubscriptionDefaults(
+        parsed: ParsedImport,
+        source: ImportSource,
+        fallbackSubscriptionInterval: Long?
+    ): ParsedImport {
         val bodyInterval = parsed.bundle.locations.firstNotNullOfOrNull {
             it.metadata?.subscription?.updateIntervalMs
         }
@@ -597,6 +619,82 @@ class LocationsRepositoryImpl(
                 }
             ).normalized()
         )
+    }
+
+    /**
+     * Remnawave panels answer unknown apps with base64 share links, but serve
+     * full Xray configs at `<url>/json`. Our emergency-sub adds olcRTC rooms at
+     * `<url>/emergency`; any failure there just means no emergency servers.
+     */
+    private suspend fun resolveRemnawaveImport(
+        url: String,
+        fallbackSubscriptionInterval: Long?,
+        subscriptionProxy: SubscriptionFetchProxy?,
+        allowInsecureRequests: Boolean
+    ): ResolvedImport? {
+        val subscriptionUrl = url.trim()
+        val base = subscriptionUrl.trimEnd('/')
+        val main = downloadTextFromUrl(
+            url = "$base/json",
+            requestMode = SubscriptionRequestMode.Identity,
+            subscriptionProxy = subscriptionProxy,
+            allowInsecureRequests = allowInsecureRequests
+        ) as? DownloadSubscriptionResult.Success ?: return null
+        val servers = XrayConfig.parseSubscription(main.value.content) ?: return null
+
+        val (used, available) = parseSubscriptionUserInfo(main.value.userInfo)
+        val subscription = SubscriptionMetadata(
+            name = main.value.profileTitle,
+            used = used,
+            available = available
+        ).normalized().takeUnless { it.isEmpty() }
+        val usedIds = mutableSetOf<String>()
+        val xrayEntries = servers.map { server ->
+            LocationEntry(
+                storageId = uniqueStorageId("xray_${server.name}", usedIds),
+                name = server.name,
+                subscriptionUrl = subscriptionUrl,
+                kind = LocationConfig.KIND_XRAY,
+                xrayConfig = server.config,
+                metadata = LocationMetadata(subscription = subscription)
+            )
+        }
+
+        val emergencyDownload = downloadTextFromUrl(
+            url = "$base/emergency",
+            requestMode = SubscriptionRequestMode.Identity,
+            subscriptionProxy = subscriptionProxy,
+            allowInsecureRequests = allowInsecureRequests
+        ) as? DownloadSubscriptionResult.Success
+        val emergencyEntries = emergencyDownload
+            ?.let { parseOlcRtcText(it.value.content.normalizedImportText(), subscriptionUrl) }
+            ?.locations
+            .orEmpty()
+            .map { entry ->
+                val name = entry.name.ifBlank { entry.location.displayName() }
+                entry.copy(
+                    storageId = uniqueStorageId("emergency_$name", usedIds),
+                    name = "$EMERGENCY_PREFIX$name",
+                    subscriptionUrl = subscriptionUrl,
+                    metadata = (entry.metadata ?: LocationMetadata()).copy(subscription = subscription)
+                )
+            }
+
+        val source = ImportSource(
+            content = main.value.content,
+            subscriptionUrl = subscriptionUrl,
+            updateIntervalMs = main.value.updateIntervalMs,
+            requestMode = SubscriptionRequestMode.Identity,
+            allowInsecureRequests = allowInsecureRequests
+        )
+        val parsed = ParsedImport(
+            bundle = LocationBundleV4(
+                activeLocationId = xrayEntries.first().storageId,
+                locations = xrayEntries + emergencyEntries
+            ),
+            mode = ImportMode.Additive
+        )
+        return ResolvedImport(source, applySubscriptionDefaults(parsed, source, fallbackSubscriptionInterval))
     }
 
     private suspend fun resolveImportSourceDetailed(
@@ -710,7 +808,9 @@ class LocationsRepositoryImpl(
                 DownloadSubscriptionResult.Success(
                     DownloadedSubscription(
                         content = content,
-                        updateIntervalMs = response.profileUpdateIntervalMs()
+                        updateIntervalMs = response.profileUpdateIntervalMs(),
+                        profileTitle = response.headers["profile-title"]?.let(::decodeProfileTitle),
+                        userInfo = response.headers["subscription-userinfo"]
                     )
                 )
             }
@@ -780,6 +880,28 @@ class LocationsRepositoryImpl(
 
     private fun String.normalizedImportText(): String {
         return trim().removePrefix(UTF8_BOM).trim()
+    }
+
+    /** `upload=..; download=..; total=..; expire=..` → used and total traffic labels. */
+    private fun parseSubscriptionUserInfo(value: String?): Pair<String?, String?> {
+        if (value.isNullOrBlank()) return null to null
+        val fields = value.split(';').mapNotNull { part ->
+            val pair = part.split('=', limit = 2)
+            if (pair.size != 2) null else pair[0].trim().lowercase() to pair[1].trim().toLongOrNull()
+        }.toMap()
+        val used = (fields["upload"] ?: 0L) + (fields["download"] ?: 0L)
+        val total = fields["total"]?.takeIf { it > 0L }
+        return formatTrafficBytes(used.toDouble()) to total?.let { formatTrafficBytes(it.toDouble()) }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    private fun decodeProfileTitle(value: String): String? {
+        val title = value.trim()
+        if (!title.startsWith("base64:")) return title.ifBlank { null }
+        return runCatching { Base64.decode(title.removePrefix("base64:")).decodeToString() }
+            .getOrNull()
+            ?.trim()
+            ?.ifBlank { null }
     }
 
     private suspend fun migrateLegacyBundle(): LocationBundleV4 {
@@ -1326,6 +1448,8 @@ class LocationsRepositoryImpl(
 
     private fun subscriptionSignature(location: LocationConfig): String {
         val normalized = location.normalized()
+        // Xray servers keep their place in the list by name across refreshes.
+        if (normalized.isXray) return "xray|${normalized.name}"
         return listOf(
             normalized.bypassProvider,
             normalized.transport,
@@ -1471,3 +1595,5 @@ class LocationsRepositoryImpl(
         val URL_SCHEME = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
     }
 }
+
+private const val EMERGENCY_PREFIX = "Аварийный · "

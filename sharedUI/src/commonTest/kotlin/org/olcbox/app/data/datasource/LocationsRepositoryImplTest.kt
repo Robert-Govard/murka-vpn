@@ -23,6 +23,7 @@ import org.olcbox.app.data.model.parseSubscriptionRefreshIntervalMs
 import org.olcbox.app.data.repository.LocationImportFailureKind
 import org.olcbox.app.data.repository.LocationImportResult
 import org.olcbox.app.data.share.ConfigShareService
+import org.olcbox.app.data.xray.REMNAWAVE
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -618,6 +619,111 @@ class LocationsRepositoryImplTest {
         assertEquals("https://example.test/sub.txt", imported.locations.single().subscriptionUrl)
     }
 
+    private fun remnawaveEngine(
+        paths: MutableList<String> = mutableListOf(),
+        hwids: MutableSet<String?> = mutableSetOf(),
+        emergency: Boolean = true
+    ) = MockEngine { request ->
+        paths += request.url.encodedPath
+        hwids += request.headers["x-hwid"]
+        when (request.url.encodedPath) {
+            // Remnawave answers unknown apps with base64 share links.
+            "/abc" -> respond("dmxlc3M6Ly8xMjNAZXhhbXBsZS5vcmc6NDQzI05M")
+            "/abc/json" -> respond(
+                content = REMNAWAVE,
+                headers = headersOf(
+                    "profile-title" to listOf("base64:TXlya2EgVlBO"),
+                    "profile-update-interval" to listOf("12"),
+                    "subscription-userinfo" to listOf(
+                        "upload=1073741824; download=536870912; total=10737418240; expire=0"
+                    )
+                )
+            )
+            "/abc/emergency" -> if (emergency) {
+                respond(
+                    "#name: Аварийный режим\n#refresh: 6h\n\n" +
+                        "olcrtc://wbstream?vp8channel<vp8-batch=32>@room-1#${"d".repeat(64)}${'$'}DK-1\n##name: DK-1\n"
+                )
+            } else {
+                respond("", HttpStatusCode.NotFound)
+            }
+            else -> respond("", HttpStatusCode.NotFound)
+        }
+    }
+
+    @Test
+    fun remnawaveImportCombinesXrayAndEmergency() = runTest {
+        val paths = mutableListOf<String>()
+        val hwids = mutableSetOf<String?>()
+        val source = FakeLocationsDataSource()
+
+        val result = LocationsRepositoryImpl(
+            dataSource = source,
+            httpClient = HttpClient(remnawaveEngine(paths, hwids)),
+            deviceIdentityProvider = StaticIdentityProvider("hwid-test")
+        ).importTextDetailed("https://sub.test/abc")
+
+        assertIs<LocationImportResult.Success>(result)
+        val locations = source.stored!!.locations
+        assertEquals(listOf("🇳🇱 Нидерланды", "Server 2", "Аварийный · DK-1"), locations.map { it.name })
+        assertEquals(listOf(true, true, false), locations.map { it.location.isXray })
+        assertTrue(locations.all { it.subscriptionUrl == "https://sub.test/abc" })
+        assertEquals("room-1", locations[2].location.id)
+        val subscription = locations.first().metadata?.subscription
+        assertEquals("Myrka VPN", subscription?.name)
+        assertEquals("1.5 GB", subscription?.used)
+        assertEquals("10 GB", subscription?.available)
+        assertEquals(12L * SubscriptionMetadata.HOUR_MS, subscription?.effectiveUpdateIntervalMs())
+        assertEquals("Myrka VPN", locations[2].metadata?.subscription?.name)
+        assertEquals(listOf("/abc", "/abc/json", "/abc/emergency"), paths)
+        assertEquals(setOf<String?>("hwid-test"), hwids)
+    }
+
+    @Test
+    fun remnawaveImportWithoutEmergency() = runTest {
+        val source = FakeLocationsDataSource()
+
+        val result = LocationsRepositoryImpl(source, HttpClient(remnawaveEngine(emergency = false)))
+            .importTextDetailed("https://sub.test/abc")
+
+        assertIs<LocationImportResult.Success>(result)
+        assertEquals(listOf("🇳🇱 Нидерланды", "Server 2"), source.stored!!.locations.map { it.name })
+    }
+
+    @Test
+    fun nonRemnawaveUrlKeepsOldBehaviour() = runTest {
+        val paths = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            paths += request.url.encodedPath
+            if (request.url.encodedPath == "/sub.txt") {
+                respond("olcrtc://wbstream?vp8channel@room#${"c".repeat(64)}${'$'}Plain")
+            } else {
+                respond("", HttpStatusCode.NotFound)
+            }
+        }
+        val source = FakeLocationsDataSource()
+
+        val result = LocationsRepositoryImpl(source, HttpClient(engine)).importTextDetailed("https://example.test/sub.txt")
+
+        assertIs<LocationImportResult.Success>(result)
+        assertEquals("room", source.stored?.locations?.single()?.location?.id)
+        assertEquals(listOf("/sub.txt"), paths)
+    }
+
+    @Test
+    fun remnawaveRefreshKeepsStorageIdsAndActiveLocation() = runTest {
+        val source = FakeLocationsDataSource()
+        val repository = LocationsRepositoryImpl(source, HttpClient(remnawaveEngine()))
+        repository.importTextDetailed("https://sub.test/abc")
+        val before = source.stored!!.locations.map { it.storageId }
+        repository.setActiveLocationId(before[1])
+
+        assertEquals(1, repository.refreshSubscription("https://sub.test/abc"))
+
+        assertEquals(before, source.stored!!.locations.map { it.storageId })
+        assertEquals(before[1], source.stored!!.activeLocationId)
+    }
+
     @Test
     fun subscriptionImportFollowsHttpRedirect() = runTest {
         var requests = 0
@@ -666,11 +772,14 @@ class LocationsRepositoryImplTest {
         val bundle = source.stored
         assertTrue(imported)
         assertNotNull(bundle)
-        assertEquals(2, userAgents.size)
+        // identity request, then the Remnawave probe at <url>/json (not an Xray
+        // config here), then the browser-compatible fallback.
+        assertEquals(3, userAgents.size)
         assertEquals(CurrentAppInfo.userAgent, userAgents[0])
         assertEquals("hwid-test", hwids[0])
-        assertTrue(userAgents[1]?.startsWith("Mozilla/5.0") == true)
-        assertNull(hwids[1])
+        assertEquals(CurrentAppInfo.userAgent, userAgents[1])
+        assertTrue(userAgents[2]?.startsWith("Mozilla/5.0") == true)
+        assertNull(hwids[2])
         assertEquals("room", bundle.locations.single().location.id)
         assertEquals(
             12L * SubscriptionMetadata.HOUR_MS,

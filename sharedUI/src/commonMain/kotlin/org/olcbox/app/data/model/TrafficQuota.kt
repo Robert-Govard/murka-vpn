@@ -64,7 +64,7 @@ private fun parseTrafficBytes(value: String): Double? {
     return amount * multiplier
 }
 
-private fun formatTrafficBytes(bytes: Double): String {
+internal fun formatTrafficBytes(bytes: Double): String {
     val (amount, unit) = when {
         bytes >= PIB -> bytes / PIB to "PB"
         bytes >= TIB -> bytes / TIB to "TB"
