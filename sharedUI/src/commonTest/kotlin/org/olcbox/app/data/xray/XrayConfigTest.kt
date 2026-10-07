@@ -73,6 +73,22 @@ class XrayConfigTest {
     }
 
     @Test
+    fun forCheckDropsRoutingSoNoGeoAssetsAreNeeded() {
+        val raw = XrayConfig.parseSubscription(REMNAWAVE)!![0].config
+        val out = json.parseToJsonElement(XrayConfig.forCheck(raw)).jsonObject
+        assertFalse("routing" in out)
+        assertFalse("stats" in out)
+        assertEquals("proxy", out["outbounds"]!!.jsonArray[0].jsonObject["tag"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun forCheckMovesProxyOutboundFirst() {
+        val raw = """{"outbounds":[{"tag":"direct","protocol":"freedom"},{"tag":"proxy","protocol":"vless"}],"routing":{}}"""
+        val out = json.parseToJsonElement(XrayConfig.forCheck(raw)).jsonObject
+        assertEquals("proxy", out["outbounds"]!!.jsonArray[0].jsonObject["tag"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun summaryDescribesProxyOutbound() {
         val servers = XrayConfig.parseSubscription(REMNAWAVE)!!
         assertEquals("VLESS" to "TCP · Reality", XrayConfig.summary(servers[0].config))

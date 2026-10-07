@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import mobile.Mobile
 import org.olcbox.app.data.model.LocationConfig
+import org.olcbox.app.data.xray.XrayConfig
+import xraymobile.Xraymobile
 import java.net.ServerSocket
 
 internal object OlcRtcConnectionChecker {
@@ -12,6 +14,7 @@ internal object OlcRtcConnectionChecker {
         return withContext(Dispatchers.IO) {
             val config = locationConfig.normalized()
             if (!config.isComplete()) return@withContext null
+            if (config.isXray) return@withContext xrayCheck(config, CONNECTION_CHECK_TIMEOUT_MS)
 
             repeat(CONNECTION_CHECK_ATTEMPTS) {
                 val socksPort = allocateLocalPort()
@@ -43,6 +46,7 @@ internal object OlcRtcConnectionChecker {
         return withContext(Dispatchers.IO) {
             val config = locationConfig.normalized()
             if (!config.isComplete()) return@withContext null
+            if (config.isXray) return@withContext xrayCheck(config, HTTP_PING_TIMEOUT_MS)
 
             repeat(HTTP_PING_ATTEMPTS) {
                 val socksPort = allocateLocalPort()
@@ -72,6 +76,13 @@ internal object OlcRtcConnectionChecker {
             null
         }
     }
+
+    /** Remnawave server: fetch the ping URL through a temporary Xray. */
+    private fun xrayCheck(config: LocationConfig, timeoutMs: Long): Long? =
+        runCatching { Xraymobile.check(XrayConfig.forCheck(config.xrayConfig), HTTP_PING_URL, timeoutMs) }
+            .onFailure { Log.e("OlcRtcConnectionChecker", "Xray check failed", it) }
+            .getOrNull()
+            ?.takeIf { it >= 0L }
 
     private fun allocateLocalPort(): Int {
         return ServerSocket(0).use { it.localPort }

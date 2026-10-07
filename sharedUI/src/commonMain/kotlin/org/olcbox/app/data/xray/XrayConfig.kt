@@ -85,6 +85,22 @@ object XrayConfig {
         return JsonObject(out).toString()
     }
 
+    /**
+     * Config for a reachability check: without routing every request goes to
+     * the first outbound, so the proxy outbound is moved first and no
+     * geoip/geosite files are needed. Check replaces the inbounds itself.
+     */
+    fun forCheck(raw: String): String {
+        val root = json.parseToJsonElement(raw).jsonObject
+        val out = root.toMutableMap()
+        SERVICE_SECTIONS.forEach { out.remove(it) }
+        out.remove("routing")
+        val outbounds = (root["outbounds"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+        val proxy = outbounds.firstOrNull { it.string("tag") == "proxy" }
+        if (proxy != null) out["outbounds"] = JsonArray(listOf(proxy) + outbounds.filterNot { it === proxy })
+        return JsonObject(out).toString()
+    }
+
     /** Protocol and transport labels of the proxy outbound, e.g. "VLESS" to "TCP · Reality". */
     fun summary(raw: String): Pair<String, String> = runCatching {
         val outbounds = json.parseToJsonElement(raw).jsonObject["outbounds"] as JsonArray
