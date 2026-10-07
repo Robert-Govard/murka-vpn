@@ -274,6 +274,56 @@ val buildOlcRtcLibWindowsAmd64 = registerOlcRtcLibraryBuildTask(
     outputName = "olcrtc-windows-amd64.dll"
 )
 
+// Murka VPN: Xray for Remnawave locations, built from ../murka-core so the
+// version matches Android (github.com/xtls/xray-core in murka-core/go.mod).
+val murkaCoreRepoDir = providers.environmentVariable("MURKA_CORE_REPO")
+    .orElse(rootProject.layout.projectDirectory.asFile.parentFile.resolve("murka-core").absolutePath)
+    .map { rootProject.file(it) }
+
+fun registerXrayBuildTask(
+    taskName: String,
+    goos: String,
+    goarch: String,
+    outputName: String
+) = tasks.register<Exec>(taskName) {
+    val outputFile = generatedNativeResources.map { it.file("native/$outputName") }
+
+    inputs.files(murkaCoreRepoDir.map { dir -> fileTree(dir) { include("go.mod", "go.sum") } })
+    outputs.file(outputFile)
+    workingDir = murkaCoreRepoDir.get()
+    environment("GOOS", goos)
+    environment("GOARCH", goarch)
+    environment("CGO_ENABLED", "0")
+    commandLine(
+        "go",
+        "build",
+        "-trimpath",
+        "-ldflags",
+        "-s -w",
+        "-o",
+        outputFile.get().asFile.absolutePath,
+        "github.com/xtls/xray-core/main"
+    )
+
+    doFirst {
+        outputFile.get().asFile.parentFile.mkdirs()
+    }
+}
+
+val buildXrayDarwinArm64 = registerXrayBuildTask("buildXrayDarwinArm64", "darwin", "arm64", "xray-darwin-arm64")
+val buildXrayDarwinAmd64 = registerXrayBuildTask("buildXrayDarwinAmd64", "darwin", "amd64", "xray-darwin-amd64")
+val buildXrayWindowsAmd64 = registerXrayBuildTask("buildXrayWindowsAmd64", "windows", "amd64", "xray-windows-amd64.exe")
+val buildXrayLinuxAmd64 = registerXrayBuildTask("buildXrayLinuxAmd64", "linux", "amd64", "xray-linux-amd64")
+val buildXrayLinuxArm64 = registerXrayBuildTask("buildXrayLinuxArm64", "linux", "arm64", "xray-linux-arm64")
+
+// geoip.dat/geosite.dat come from scripts/fetch-xray-assets.sh (shared with Android).
+val copyXrayGeoAssets = tasks.register<Copy>("copyXrayGeoAssets") {
+    from(rootProject.layout.projectDirectory.dir("androidApp/src/main/assets/xray")) {
+        include("geoip.dat", "geosite.dat", "VERSION")
+    }
+    into(generatedNativeResources.map { it.dir("native/xray") })
+}
+
 val desktopNativeAssetTasks = mutableListOf<Any>(
     buildOlcRtcDarwinArm64,
     buildOlcRtcDarwinAmd64,
@@ -284,9 +334,24 @@ val desktopNativeAssetTasks = mutableListOf<Any>(
     buildOlcRtcLibDarwinAmd64,
     buildOlcRtcLibLinuxAmd64,
     buildOlcRtcLibLinuxArm64,
-    buildOlcRtcLibWindowsAmd64
+    buildOlcRtcLibWindowsAmd64,
+    buildXrayDarwinArm64,
+    buildXrayDarwinAmd64,
+    buildXrayWindowsAmd64,
+    buildXrayLinuxAmd64,
+    buildXrayLinuxArm64,
+    copyXrayGeoAssets
 )
-val hostDesktopNativeAssetTasks = mutableListOf<Any>()
+val hostDesktopNativeAssetTasks = mutableListOf<Any>(copyXrayGeoAssets)
+when {
+    currentBuildOs.isMacOsX -> hostDesktopNativeAssetTasks.add(
+        if (hostDesktopArch == "arm64") buildXrayDarwinArm64 else buildXrayDarwinAmd64
+    )
+    currentBuildOs.isWindows -> hostDesktopNativeAssetTasks.add(buildXrayWindowsAmd64)
+    currentBuildOs.isLinux -> hostDesktopNativeAssetTasks.add(
+        if (hostDesktopArch == "arm64") buildXrayLinuxArm64 else buildXrayLinuxAmd64
+    )
+}
 
 when {
     currentBuildOs.isMacOsX -> when (hostDesktopArch) {
@@ -371,18 +436,23 @@ if (currentBuildOs.isWindows) {
 }
 
 fun requiredHostNativeResourcePaths(): List<String> = buildList {
+    add("native/xray/geoip.dat")
+    add("native/xray/geosite.dat")
     when {
         currentBuildOs.isMacOsX -> {
+            add("native/xray-darwin-$hostDesktopArch")
             add("native/olcrtc-darwin-$hostDesktopArch")
             add("native/libolcrtc-darwin-$hostDesktopArch.dylib")
         }
         currentBuildOs.isWindows -> {
+            add("native/xray-windows-amd64.exe")
             add("native/olcrtc-windows-amd64.exe")
             add("native/olcrtc-windows-amd64.dll")
             add("native/tun2socks-windows-amd64.exe")
             add("native/wintun.dll")
         }
         currentBuildOs.isLinux -> {
+            add("native/xray-linux-$hostDesktopArch")
             add("native/olcrtc-linux-$hostDesktopArch")
             add("native/libolcrtc-linux-$hostDesktopArch.so")
             add("native/hev-socks5-tunnel-linux-$hostDesktopArch")

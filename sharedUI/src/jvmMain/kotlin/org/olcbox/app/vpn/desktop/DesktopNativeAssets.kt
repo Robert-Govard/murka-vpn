@@ -56,6 +56,32 @@ internal object DesktopNativeAssets {
         }
     }
 
+    /** Xray binary for Remnawave locations (built from murka-core). */
+    fun resolveXrayBinary(): Path {
+        val names = when (DesktopPaths.os) {
+            DesktopOs.MacOS -> listOf("xray-darwin-${desktopArch()}", "xray-darwin-${desktopArchFallback()}")
+            DesktopOs.Windows -> listOf("xray-windows-amd64.exe")
+            DesktopOs.Linux -> listOf("xray-linux-${desktopArch()}")
+            DesktopOs.Other -> error("Xray desktop binary supports macOS, Windows and Linux")
+        }
+        return names.firstNotNullOfOrNull { name ->
+            runCatching { resolveBinary(fileName = name, resourceName = "native/$name", candidates = emptyList()) }
+                .getOrNull()
+        } ?: error("Bundled native binary is missing: ${names.joinToString(", ") { "native/$it" }}")
+    }
+
+    /** Directory with geoip.dat and geosite.dat for XRAY_LOCATION_ASSET. */
+    fun resolveXrayAssetsDir(): Path {
+        val dir = DesktopPaths.appDataDir().resolve("bin").resolve("xray")
+        Files.createDirectories(dir)
+        for (name in listOf("geoip.dat", "geosite.dat")) {
+            val resource = javaClass.classLoader.getResourceAsStream("native/xray/$name")
+                ?: error("Bundled Xray asset is missing: native/xray/$name")
+            resource.use { Files.copy(it, dir.resolve(name), StandardCopyOption.REPLACE_EXISTING) }
+        }
+        return dir
+    }
+
     fun resolveHevSocks5TunnelBinary(): Path {
         val fileName = hevSocks5TunnelFileName()
         return resolveBinary(
