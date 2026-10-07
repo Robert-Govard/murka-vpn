@@ -1,5 +1,8 @@
 package org.olcbox.app.vpn
 
+import kotlinx.coroutines.CancellationException
+import org.olcbox.app.vpn.desktop.XrayProcess
+import org.olcbox.app.data.xray.XrayConfig
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +40,7 @@ internal object OlcRtcConnectionChecker {
         return withContext(Dispatchers.IO) {
             val config = locationConfig.normalized()
             if (!config.isComplete()) return@withContext null
+            if (config.isXray) return@withContext xrayCheck(config)
 
             val nativeLib = if (DesktopPaths.os == DesktopOs.Linux) null else OlcRtcNativeLib.INSTANCE
             if (nativeLib != null) {
@@ -89,6 +93,7 @@ internal object OlcRtcConnectionChecker {
         return withContext(Dispatchers.IO) {
             val config = locationConfig.normalized()
             if (!config.isComplete()) return@withContext null
+            if (config.isXray) return@withContext xrayCheck(config)
 
             val nativeLib = if (DesktopPaths.os == DesktopOs.Linux) null else OlcRtcNativeLib.INSTANCE
             if (nativeLib != null) {
@@ -322,6 +327,30 @@ internal object OlcRtcConnectionChecker {
         }
 
         error("olcRTC start timed out")
+    }
+
+    /** Remnawave server: ping through a temporary xray process without routing rules. */
+    private suspend fun xrayCheck(config: LocationConfig): Long? {
+        val port = allocateLocalPort()
+        val prepared = XrayConfig.prepare(XrayConfig.forCheck(config.xrayConfig), PacServer.LOCAL_SOCKS_HOST, port, "", "")
+        val configPath = XrayProcess.writeConfig(DesktopPaths.appDataDir().resolve("runtime"), prepared)
+        var process: Process? = null
+        return try {
+            val command = XrayProcess.command(DesktopNativeAssets.resolveXrayBinary(), configPath)
+            process = ProcessBuilder(command).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+            val deadline = System.currentTimeMillis() + OLC_READY_TIMEOUT_MS
+            while (!canConnectToSocks(port)) {
+                if (!process.isAlive || System.currentTimeMillis() > deadline) return null
+                delay(READY_POLL_INTERVAL_MS)
+            }
+            runCatching { httpPingThroughSocks(port) }.getOrNull()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            null
+        } finally {
+            stopProcess(process)
+            runCatching { Files.deleteIfExists(configPath) }
+        }
     }
 
     private fun httpPingThroughSocks(socksPort: Int): Long {
