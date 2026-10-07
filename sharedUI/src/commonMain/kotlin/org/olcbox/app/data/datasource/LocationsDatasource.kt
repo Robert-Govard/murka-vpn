@@ -676,7 +676,10 @@ class LocationsRepositoryImpl(
                     storageId = uniqueStorageId("emergency_$name", usedIds),
                     name = "$EMERGENCY_PREFIX$name",
                     subscriptionUrl = subscriptionUrl,
-                    metadata = (entry.metadata ?: LocationMetadata()).copy(subscription = subscription)
+                    metadata = (entry.metadata ?: LocationMetadata()).copy(
+                        name = entry.metadata?.name?.let { "$EMERGENCY_PREFIX$it" },
+                        subscription = subscription
+                    )
                 )
             }
 

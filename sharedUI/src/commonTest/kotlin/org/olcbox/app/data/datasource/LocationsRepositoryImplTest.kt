@@ -669,6 +669,8 @@ class LocationsRepositoryImplTest {
         assertEquals(listOf(true, true, false), locations.map { it.location.isXray })
         assertTrue(locations.all { it.subscriptionUrl == "https://sub.test/abc" })
         assertEquals("room-1", locations[2].location.id)
+        // The list shows metadata.name (##name) when present.
+        assertEquals("Аварийный · DK-1", locations[2].metadata?.name)
         val subscription = locations.first().metadata?.subscription
         assertEquals("Myrka VPN", subscription?.name)
         assertEquals("1.5 GB", subscription?.used)
