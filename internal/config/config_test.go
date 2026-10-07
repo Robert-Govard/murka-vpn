@@ -442,3 +442,27 @@ crypto:
 		t.Fatalf("Load err = %v, want ErrCryptoKeysFileConflict", err)
 	}
 }
+
+func TestLoadStatusFileRelativeToConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "olcrtc.yaml")
+	body := `
+mode: srv
+status:
+  file: run/status.json
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := filepath.Join(dir, "run", "status.json")
+	if f.Status.File != want {
+		t.Fatalf("Status.File = %q, want %q", f.Status.File, want)
+	}
+	if got := Apply(f).StatusFile; got != want {
+		t.Fatalf("Apply StatusFile = %q, want %q", got, want)
+	}
+}

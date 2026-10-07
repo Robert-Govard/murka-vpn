@@ -50,6 +50,7 @@ type Settings struct {
 	Liveness  Liveness  `yaml:"liveness"`
 	Lifecycle Lifecycle `yaml:"lifecycle"`
 	Traffic   Traffic   `yaml:"traffic"`
+	Status    Status    `yaml:"status"`
 }
 
 // File is the on-disk YAML schema.
@@ -100,6 +101,11 @@ type Crypto struct {
 	Key      string `yaml:"key"`       // 64-char hex (32 bytes)
 	KeyFile  string `yaml:"key_file"`  // path to a file containing crypto.key
 	KeysFile string `yaml:"keys_file"` // srv only: file with one key per line, reloaded live
+}
+
+// Status configures the server status file read by node tooling.
+type Status struct {
+	File string `yaml:"file"` // srv only: JSON room state, rewritten every 15s
 }
 
 // Net groups network and transport selection.
@@ -222,6 +228,7 @@ func loadExternalSecrets(configPath string, file *File) error {
 	if err := resolveKeysFile(configPath, &file.Crypto); err != nil {
 		return err
 	}
+	file.Status.File = resolveRelative(configPath, file.Status.File)
 
 	key, err := resolveKey(configPath, file.Crypto)
 	if err != nil {
@@ -234,6 +241,7 @@ func loadExternalSecrets(configPath string, file *File) error {
 		if err := resolveKeysFile(configPath, &file.Profiles[i].Crypto); err != nil {
 			return fmt.Errorf("profiles[%d]: %w", i, err)
 		}
+		file.Profiles[i].Status.File = resolveRelative(configPath, file.Profiles[i].Status.File)
 
 		key, err := resolveKey(configPath, file.Profiles[i].Crypto)
 		if err != nil {
@@ -262,6 +270,14 @@ func resolveKeysFile(configPath string, c *Crypto) error {
 	}
 
 	return nil
+}
+
+// resolveRelative makes a non-empty path absolute relative to the config file.
+func resolveRelative(configPath, p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(filepath.Dir(configPath), p)
 }
 
 func resolveKey(configPath string, crypto Crypto) (string, error) {
@@ -327,6 +343,7 @@ func ApplySettings(dst session.Config, s Settings) session.Config {
 	dst.ChannelID = overlay(dst.ChannelID, s.Room.Channel)
 	dst.KeyHex = overlay(dst.KeyHex, s.Crypto.Key)
 	dst.KeysFile = overlay(dst.KeysFile, s.Crypto.KeysFile)
+	dst.StatusFile = overlay(dst.StatusFile, s.Status.File)
 
 	dst.SOCKSHost = overlay(dst.SOCKSHost, s.SOCKS.Host)
 	dst.SOCKSPort = overlay(dst.SOCKSPort, s.SOCKS.Port)

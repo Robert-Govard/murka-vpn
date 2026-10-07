@@ -52,14 +52,15 @@ var (
 	ErrUnsupportedTransport = errors.New("unsupported transport")
 	ErrTransportRequired    = errors.New(
 		"transport required (set transport to datachannel, videochannel, seichannel or vp8channel)")
-	ErrKeyRequired         = errors.New("key required (set crypto.key)")
-	ErrKeysFileServerOnly  = errors.New("crypto.keys_file is only supported in srv mode")
-	ErrKeysFileConflict    = errors.New("crypto.keys_file cannot be combined with crypto.key")
-	ErrDNSServerRequired   = errors.New("dns server required (set net.dns)")
-	ErrVideoWidthRequired  = errors.New("video width required for videochannel (set video.width)")
-	ErrVideoHeightRequired = errors.New("video height required for videochannel (set video.height)")
-	ErrVideoFPSRequired    = errors.New("video fps required for videochannel (set video.fps)")
-	ErrVideoCodecInvalid   = errors.New(
+	ErrKeyRequired          = errors.New("key required (set crypto.key)")
+	ErrKeysFileServerOnly   = errors.New("crypto.keys_file is only supported in srv mode")
+	ErrKeysFileConflict     = errors.New("crypto.keys_file cannot be combined with crypto.key")
+	ErrStatusFileServerOnly = errors.New("status.file is only supported in srv mode")
+	ErrDNSServerRequired    = errors.New("dns server required (set net.dns)")
+	ErrVideoWidthRequired   = errors.New("video width required for videochannel (set video.width)")
+	ErrVideoHeightRequired  = errors.New("video height required for videochannel (set video.height)")
+	ErrVideoFPSRequired     = errors.New("video fps required for videochannel (set video.fps)")
+	ErrVideoCodecInvalid    = errors.New(
 		"invalid video codec for videochannel (set video.codec to qrcode or tile)")
 	ErrTileCodecDimensions    = errors.New("tile codec requires video.width: 1080 and video.height: 1080")
 	ErrVideoDimensionsInvalid = errors.New(
@@ -139,6 +140,7 @@ type Config struct {
 	ChannelID             string
 	KeyHex                string
 	KeysFile              string
+	StatusFile            string
 	SOCKSHost             string
 	SOCKSPort             int
 	SOCKSUser             string

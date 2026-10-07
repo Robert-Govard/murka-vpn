@@ -102,6 +102,7 @@ type Config struct {
 	ChannelID        string
 	KeyHex           string
 	KeysFile         string
+	StatusFile       string
 	DNSServer        string
 	Resolver         *net.Resolver
 	SOCKSProxyAddr   string
@@ -195,6 +196,9 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		logger.Infof("keys file mode: %d key(s) from %s", s.ring.Len(), cfg.KeysFile)
 		s.goTracked(func() { s.watchKeyRing(runCtx) })
+	}
+	if cfg.StatusFile != "" {
+		s.goTracked(func() { s.writeStatus(runCtx, cfg.StatusFile) })
 	}
 	go func() {
 		<-runCtx.Done()

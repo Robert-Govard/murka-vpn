@@ -89,6 +89,9 @@ func validateCommon(cfg Config) error {
 	if err := validateKeyConfig(cfg); err != nil {
 		return err
 	}
+	if cfg.StatusFile != "" && cfg.Mode != ModeSrv {
+		return ErrStatusFileServerOnly
+	}
 	if cfg.DNSServer == "" && cfg.Resolver == nil {
 		return ErrDNSServerRequired
 	}

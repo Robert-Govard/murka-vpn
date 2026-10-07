@@ -706,3 +706,28 @@ func TestValidateKeysFile(t *testing.T) {
 		t.Fatalf("key + keys_file: err = %v, want %v", err, ErrKeysFileConflict)
 	}
 }
+
+func TestValidateStatusFile(t *testing.T) {
+	RegisterDefaults()
+	srv := Config{
+		Mode:       ModeSrv,
+		Transport:  transportVP8,
+		Provider:   "wbstream",
+		RoomID:     "room-1",
+		KeysFile:   "/tmp/room.keys",
+		StatusFile: "/run/olcrtc/room-1/status.json",
+		DNSServer:  "8.8.8.8:53",
+	}
+	if _, err := prepareRunConfig(srv); err != nil {
+		t.Fatalf("srv with status file: %v", err)
+	}
+
+	cnc := srv
+	cnc.Mode = ModeCnc
+	cnc.KeysFile = ""
+	cnc.KeyHex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+	cnc.SOCKSHost, cnc.SOCKSPort = "127.0.0.1", 1080
+	if _, err := prepareRunConfig(cnc); !errors.Is(err, ErrStatusFileServerOnly) {
+		t.Fatalf("cnc with status file: err = %v, want %v", err, ErrStatusFileServerOnly)
+	}
+}
