@@ -70,9 +70,13 @@ internal object DesktopNativeAssets {
         } ?: error("Bundled native binary is missing: ${names.joinToString(", ") { "native/$it" }}")
     }
 
-    /** Directory with geoip.dat and geosite.dat for XRAY_LOCATION_ASSET. */
+    /**
+     * Directory with geoip.dat and geosite.dat. It is the directory of the xray
+     * binary, Xray's default asset location, so privileged launches that drop
+     * XRAY_LOCATION_ASSET still find them.
+     */
     fun resolveXrayAssetsDir(): Path {
-        val dir = DesktopPaths.appDataDir().resolve("bin").resolve("xray")
+        val dir = DesktopPaths.appDataDir().resolve("bin")
         Files.createDirectories(dir)
         for (name in listOf("geoip.dat", "geosite.dat")) {
             val resource = javaClass.classLoader.getResourceAsStream("native/xray/$name")

@@ -119,6 +119,25 @@ internal class WindowsTunController(
         }.getOrDefault(false)
     }
 
+    /**
+     * Alias of the interface that carries the IPv4 default route. Read it before
+     * TUN routes exist: Xray binds its outbounds to it (sockopt.interface) so its
+     * own traffic does not loop back into the tunnel.
+     */
+    suspend fun detectPhysicalInterface(): String {
+        val alias = runPowerShell(
+            """
+            ${'$'}ErrorActionPreference = 'Stop'
+            Get-NetRoute -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 |
+              Where-Object { ${'$'}_.InterfaceAlias -ne '$TUN_NAME' } |
+              Sort-Object { ${'$'}_.RouteMetric + (Get-NetIPInterface -InterfaceIndex ${'$'}_.InterfaceIndex -AddressFamily IPv4).InterfaceMetric } |
+              Select-Object -First 1 -ExpandProperty InterfaceAlias
+            """.trimIndent()
+        ).trim()
+        require(alias.isNotBlank()) { "No IPv4 default route found for Xray" }
+        return alias
+    }
+
     private suspend fun installRoutes() {
         runPowerShell(
             """

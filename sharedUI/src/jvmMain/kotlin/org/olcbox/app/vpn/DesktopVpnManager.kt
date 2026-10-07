@@ -1,5 +1,7 @@
 package org.olcbox.app.vpn
 
+import org.olcbox.app.data.xray.XrayConfig
+import org.olcbox.app.vpn.desktop.XrayProcess
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -206,14 +208,30 @@ class DesktopVpnManager private constructor(
                 windowsTunController.ensureAdministratorOrRequestRestart()
             }
 
-            process = startOlcRtcProcessWithFallback(
-                location = location,
-                socksSettings = socksSettings,
-                ready = ready,
-                startupFailure = startupFailure,
-                logOutput = true,
-                privileged = desktopMode == DesktopMode.LinuxTun
-            )
+            process = if (location.isXray) {
+                val bindInterface = if (desktopMode == DesktopMode.WindowsTun) {
+                    windowsTunController.detectPhysicalInterface()
+                } else {
+                    null
+                }
+                startXrayProcess(
+                    location = location,
+                    socksSettings = socksSettings,
+                    ready = ready,
+                    startupFailure = startupFailure,
+                    bindInterface = bindInterface,
+                    privileged = desktopMode == DesktopMode.LinuxTun
+                )
+            } else {
+                startOlcRtcProcessWithFallback(
+                    location = location,
+                    socksSettings = socksSettings,
+                    ready = ready,
+                    startupFailure = startupFailure,
+                    logOutput = true,
+                    privileged = desktopMode == DesktopMode.LinuxTun
+                )
+            }
 
             val olcRtcProcess = process ?: error("olcRTC process is missing")
             waitForOlcRtcReady(
@@ -523,6 +541,68 @@ class DesktopVpnManager private constructor(
             logJob = readerJob
         }
 
+        return startedProcess
+    }
+
+    /** Remnawave location: Xray serves the same local SOCKS port as olcRTC would. */
+    private fun startXrayProcess(
+        location: LocationConfig,
+        socksSettings: DesktopSocksProxySettings,
+        ready: CompletableDeferred<Unit>,
+        startupFailure: CompletableDeferred<String>,
+        bindInterface: String?,
+        privileged: Boolean
+    ): Process {
+        val binary = DesktopNativeAssets.resolveXrayBinary()
+        val assetsDir = DesktopNativeAssets.resolveXrayAssetsDir()
+        val prepared = XrayConfig.prepare(
+            raw = location.xrayConfig,
+            socksHost = socksSettings.host,
+            socksPort = socksSettings.port,
+            username = socksSettings.username,
+            password = socksSettings.password,
+            bindInterface = bindInterface
+        )
+        val configPath = XrayProcess.writeConfig(DesktopPaths.appDataDir().resolve("runtime"), prepared)
+        deleteOlcRtcConfig()
+        olcRtcConfigPath = configPath
+
+        addLog(
+            "Starting Xray ${location.providerName()} ${location.transportName()} for ${location.displayName()}" +
+                (bindInterface?.let { " via $it" } ?: "")
+        )
+        val command = XrayProcess.command(binary, configPath)
+        val processBuilder = ProcessBuilder(
+            if (privileged) LinuxPrivilege.command(command) else command
+        ).redirectErrorStream(true)
+        processBuilder.environment()[XrayProcess.ASSET_ENV] = assetsDir.toString()
+        processBuilder.environment()["NO_PROXY"] = "127.0.0.1,localhost"
+        processBuilder.environment()["no_proxy"] = "127.0.0.1,localhost"
+
+        val startedProcess = try {
+            processBuilder.start()
+        } catch (e: Exception) {
+            deleteOlcRtcConfig()
+            throw e
+        }
+
+        logJob?.cancel()
+        logJob = scope.launch {
+            try {
+                startedProcess.inputStream.bufferedReader().useLines { lines ->
+                    for (line in lines) {
+                        if (!isActive) break
+                        val message = "xray: $line"
+                        addLog(message)
+                        println(message)
+                        if (XrayProcess.isReadyLine(line)) ready.complete(Unit)
+                        if (XrayProcess.isFatalLine(line)) startupFailure.complete(line)
+                    }
+                }
+            } catch (_: IOException) {
+                // stdout closes when the process stops.
+            }
+        }
         return startedProcess
     }
 
