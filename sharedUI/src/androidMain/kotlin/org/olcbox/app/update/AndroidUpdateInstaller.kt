@@ -48,7 +48,7 @@ class AndroidUpdateInstaller(
         return runCatching {
             if (!canRequestPackageInstalls()) {
                 openUnknownSourcesSettings().getOrThrow()
-                return@runCatching "Allow Olcbox to install updates, then tap Download again"
+                return@runCatching "Allow Мурка VPN to install updates, then tap Download again"
             }
 
             val file = download(asset, onProgress).getOrThrow()

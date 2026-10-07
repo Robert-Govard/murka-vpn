@@ -572,9 +572,9 @@ class LocationsRepositoryImpl(
                 ?: ResolvedImportResult.Failure(
                     LocationImportFailureKind.UnsupportedFormat,
                     if (input.isHttpUrl()) {
-                        "The server responded, but the body is not a supported Olcbox configuration"
+                        "The server responded, but the body is not a supported configuration"
                     } else {
-                        "The text is not a supported Olcbox configuration"
+                        "The text is not a supported configuration"
                     }
                 )
         }

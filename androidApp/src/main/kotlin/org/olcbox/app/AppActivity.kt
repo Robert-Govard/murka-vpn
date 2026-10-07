@@ -45,9 +45,13 @@ class AppActivity : ComponentActivity() {
         val locationsRepository = LocationsRepositoryImpl(locationsDataSource)
         val configImporter = AndroidConfigImporter(this)
         val logExporter = AndroidLogExporter(this)
-        val updateService = AppUpdateService(
-            deviceIdentityProvider = PersistentDeviceIdentityProvider(locationsDataSource)
-        )
+        val updateService = if (CurrentAppInfo.updatesEnabled) {
+            AppUpdateService(
+                deviceIdentityProvider = PersistentDeviceIdentityProvider(locationsDataSource)
+            )
+        } else {
+            null
+        }
 
         val viewModel = HomeScreenViewModel(
             vpnManager = vpnManager,

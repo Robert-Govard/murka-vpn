@@ -166,7 +166,7 @@ fun AndroidMainScreen(
             updateStatusText = "${info.channel.name} update available: ${info.version}"
         } else {
             updateOffer = null
-            updateStatusText = "Olcbox is up to date"
+            updateStatusText = "Мурка VPN is up to date"
         }
     }
 
@@ -210,7 +210,7 @@ fun AndroidMainScreen(
         scope.launch {
             if (!updateInstaller.canRequestPackageInstalls()) {
                 updateInstaller.openUnknownSourcesSettings()
-                updateStatusText = "Allow Olcbox to install updates, then tap Download again"
+                updateStatusText = "Allow Мурка VPN to install updates, then tap Download again"
                 Toast.makeText(context, updateStatusText, Toast.LENGTH_LONG).show()
                 return@launch
             }

@@ -4,15 +4,14 @@ import io.ktor.http.Url
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** olcbox://add?url=<percent-encoded HTTP(S) subscription URL>. Decode exactly once. */
+/** murka://add?url=<percent-encoded HTTP(S) subscription URL> (olcbox://add is accepted too). Decode exactly once. */
 object ImportDeepLink {
     const val MAX_LENGTH = 16_384
 
     fun parse(value: String): String? = runCatching {
         require(value.length <= MAX_LENGTH && value.all { it.code in 33..126 })
         val route = value.substringBefore('?')
-        require(route.equals("olcbox://add", ignoreCase = true) ||
-            route.equals("olcbox://add/", ignoreCase = true))
+        require(route.removeSuffix("/").lowercase() in setOf("murka://add", "olcbox://add"))
         require('?' in value && '#' !in value)
         val query = value.substringAfter('?')
         require(query.startsWith("url=") && '&' !in query)

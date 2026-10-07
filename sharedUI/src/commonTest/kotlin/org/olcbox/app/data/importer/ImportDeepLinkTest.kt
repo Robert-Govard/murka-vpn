@@ -17,6 +17,16 @@ class ImportDeepLinkTest {
     }
 
     @Test
+    fun acceptsMurkaScheme() {
+        assertEquals(
+            "https://subgovard.mooo.com/abc",
+            ImportDeepLink.parse("murka://add?url=https%3A%2F%2Fsubgovard.mooo.com%2Fabc")
+        )
+        assertEquals("https://example.org/sub", ImportDeepLink.parse("MURKA://add/?url=https%3A%2F%2Fexample.org%2Fsub"))
+        assertNull(ImportDeepLink.parse("murka://other?url=https%3A%2F%2Fexample.org"))
+    }
+
+    @Test
     fun rejectsMalformedAmbiguousAndUnsupportedLinks() {
         listOf(
             "olcbox://add", "olcbox://add?url=", "olcbox://other?url=https%3A%2F%2Fexample.org",

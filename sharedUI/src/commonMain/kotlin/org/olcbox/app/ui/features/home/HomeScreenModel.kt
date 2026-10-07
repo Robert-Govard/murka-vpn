@@ -424,7 +424,7 @@ class HomeScreenViewModel(
 
     private fun buildLogsExport(logs: List<String>): String {
         return buildString {
-            appendLine("Olcbox application logs")
+            appendLine("Мурка VPN application logs")
             appendLine("Build: ${org.olcbox.app.CurrentAppInfo.diagnosticVersion}")
             appendLine("Entries: ${logs.size}")
             appendLine()

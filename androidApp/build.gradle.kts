@@ -46,7 +46,7 @@ android {
         minSdk = 23
         targetSdk = 37
 
-        applicationId = "org.olcbox.app"
+        applicationId = "com.murkavpn.app"
         versionCode = olcboxVersionCode.get()
         versionName = olcboxVersion.get()
 
