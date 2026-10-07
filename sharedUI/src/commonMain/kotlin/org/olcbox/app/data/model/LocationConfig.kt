@@ -13,6 +13,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import org.olcbox.app.data.xray.XrayConfig
 
 expect fun isTransportSupportedOnCurrentPlatform(transport: String): Boolean
 
@@ -29,9 +30,22 @@ data class LocationConfig(
     @SerialName("vp8_batch")
     val vp8Batch: Int = DEFAULT_VP8_BATCH,
     @SerialName("dns_server")
-    val dnsServer: String = ""
+    val dnsServer: String = "",
+    val kind: String = KIND_OLCRTC,
+    @SerialName("xray_config")
+    val xrayConfig: String = ""
 ) {
+    val isXray: Boolean get() = kind == KIND_XRAY
+
     fun normalized(): LocationConfig {
+        if (isXray) {
+            return copy(
+                name = name.trim(),
+                kind = KIND_XRAY,
+                xrayConfig = xrayConfig.trim(),
+                dnsServer = dnsServer.trim().take(MAX_DNS_SERVER_LENGTH)
+            )
+        }
         val provider = normalizeProvider(bypassProvider)
         val normalizedTransport = normalizeTransport(transport, provider)
         return copy(
@@ -42,19 +56,25 @@ data class LocationConfig(
             transport = normalizedTransport,
             dnsServer = dnsServer.trim().take(MAX_DNS_SERVER_LENGTH),
             vp8Fps = sanitizeVp8Fps(vp8Fps),
-            vp8Batch = sanitizeVp8Batch(vp8Batch)
+            vp8Batch = sanitizeVp8Batch(vp8Batch),
+            kind = KIND_OLCRTC
         )
     }
 
-    fun isComplete(): Boolean = id.isNotBlank() && key.isNotBlank()
+    fun isComplete(): Boolean =
+        if (isXray) xrayConfig.isNotBlank() else id.isNotBlank() && key.isNotBlank()
 
     fun displayName(): String = name.ifBlank { id }
 
-    fun providerName(): String = providerDisplayName(bypassProvider)
+    fun providerName(): String =
+        if (isXray) XrayConfig.summary(xrayConfig).first else providerDisplayName(bypassProvider)
 
-    fun transportName(): String = transportDisplayName(transport, bypassProvider)
+    fun transportName(): String =
+        if (isXray) XrayConfig.summary(xrayConfig).second else transportDisplayName(transport, bypassProvider)
 
     companion object {
+        const val KIND_OLCRTC = "olcrtc"
+        const val KIND_XRAY = "xray"
         const val PROVIDER_JAZZ = "jazz"
         const val PROVIDER_TELEMOST = "telemost"
         const val PROVIDER_WB_STREAM = "wbstream"
@@ -578,10 +598,21 @@ data class LocationEntry(
     @SerialName("dns_server")
     val dnsServer: String? = null,
     @SerialName("dnsServer")
-    val legacyDnsServerCamel: String? = null
+    val legacyDnsServerCamel: String? = null,
+    val kind: String? = null,
+    @SerialName("xray_config")
+    val xrayConfig: String? = null
 ) {
     val location: LocationConfig
         get() {
+            if (kind == LocationConfig.KIND_XRAY) {
+                return LocationConfig(
+                    name = name,
+                    kind = LocationConfig.KIND_XRAY,
+                    xrayConfig = xrayConfig.orEmpty(),
+                    dnsServer = firstNotBlank(dnsServer, legacyDnsServerCamel)
+                ).normalized()
+            }
             val provider = firstNotBlank(
                 authProvider,
                 legacyCarrier,
@@ -616,6 +647,19 @@ data class LocationEntry(
 
     fun normalized(): LocationEntry {
         val config = location
+        if (config.isXray) {
+            return LocationEntry(
+                storageId = storageId.trim(),
+                name = config.name,
+                subscriptionUrl = firstNotBlank(subscriptionUrl, legacySubscriptionUrl).ifBlank { null },
+                dnsServer = config.dnsServer.takeIf { it.isNotBlank() },
+                metadata = metadata
+                    ?.normalized()
+                    ?.takeUnless { it.isEmpty() },
+                kind = LocationConfig.KIND_XRAY,
+                xrayConfig = config.xrayConfig
+            )
+        }
         return LocationEntry(
             storageId = storageId.trim(),
             name = config.name,
@@ -641,6 +685,17 @@ data class LocationEntry(
             metadata: LocationMetadata? = null
         ): LocationEntry {
             val config = location.normalized()
+            if (config.isXray) {
+                return LocationEntry(
+                    storageId = storageId,
+                    name = config.name,
+                    subscriptionUrl = subscriptionUrl,
+                    dnsServer = config.dnsServer.takeIf { it.isNotBlank() },
+                    metadata = metadata,
+                    kind = LocationConfig.KIND_XRAY,
+                    xrayConfig = config.xrayConfig
+                ).normalized()
+            }
             return LocationEntry(
                 storageId = storageId,
                 name = config.name,
