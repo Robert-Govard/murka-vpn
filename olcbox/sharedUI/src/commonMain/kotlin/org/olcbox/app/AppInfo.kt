@@ -13,8 +13,8 @@ object CurrentAppInfo {
         olcrtcSha = GeneratedAppInfo.OLCRTC_SHA
     )
 
-    /** Off until Murka VPN has its own release repository (ReleaseMirror.GitHub). */
-    const val updatesEnabled: Boolean = false
+    /** Updates come from the public Robert-Govard/murka-vpn-releases (ReleaseMirror.GitHub). */
+    const val updatesEnabled: Boolean = true
 
     val userAgent: String = "${value.name}/${value.version}"
     val diagnosticVersion: String = "${value.name}/${value.version} olcrtc/${value.olcrtcSha.take(12)}"
