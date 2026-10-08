@@ -126,6 +126,14 @@ jobs:
         run: |
           if [ -z "$RELEASES_TOKEN" ]; then echo "RELEASES_TOKEN not set, skipping $PUBLIC_REPO"; exit 0; fi
           GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" olcbox/dist/* --clobber -R "$PUBLIC_REPO"
+          # Stable releases also get version-less names, so download buttons can use
+          # releases/latest/download/<name>. Not for nightly: the app reads the
+          # nightly version from the file name.
+          if [ "$TAG" != nightly ]; then
+            mkdir -p stable-names
+            for f in olcbox/dist/*; do cp "$f" "stable-names/$(basename "$f" | sed "s/-${VERSION}-/-/")"; done
+            GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" stable-names/* --clobber -R "$PUBLIC_REPO"
+          fi
 
   windows:
     needs: version
@@ -176,6 +184,14 @@ jobs:
         run: |
           if [ -z "$RELEASES_TOKEN" ]; then echo "RELEASES_TOKEN not set, skipping $PUBLIC_REPO"; exit 0; fi
           GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" olcbox/dist/* --clobber -R "$PUBLIC_REPO"
+          # Stable releases also get version-less names, so download buttons can use
+          # releases/latest/download/<name>. Not for nightly: the app reads the
+          # nightly version from the file name.
+          if [ "$TAG" != nightly ]; then
+            mkdir -p stable-names
+            for f in olcbox/dist/*; do cp "$f" "stable-names/$(basename "$f" | sed "s/-${VERSION}-/-/")"; done
+            GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" stable-names/* --clobber -R "$PUBLIC_REPO"
+          fi
 
   macos:
     needs: version
@@ -215,3 +231,11 @@ jobs:
         run: |
           if [ -z "$RELEASES_TOKEN" ]; then echo "RELEASES_TOKEN not set, skipping $PUBLIC_REPO"; exit 0; fi
           GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" olcbox/dist/* --clobber -R "$PUBLIC_REPO"
+          # Stable releases also get version-less names, so download buttons can use
+          # releases/latest/download/<name>. Not for nightly: the app reads the
+          # nightly version from the file name.
+          if [ "$TAG" != nightly ]; then
+            mkdir -p stable-names
+            for f in olcbox/dist/*; do cp "$f" "stable-names/$(basename "$f" | sed "s/-${VERSION}-/-/")"; done
+            GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" stable-names/* --clobber -R "$PUBLIC_REPO"
+          fi
