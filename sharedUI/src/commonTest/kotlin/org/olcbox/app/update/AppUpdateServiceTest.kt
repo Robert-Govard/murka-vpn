@@ -21,10 +21,10 @@ class AppUpdateServiceTest {
     }
 
     @Test
-    fun updateSettingsNormalizeToNightlyChannel() {
-        val settings = AppUpdateSettings(channel = ReleaseChannel.Stable)
-
-        assertEquals(ReleaseChannel.Nightly, settings.normalized().channel)
+    fun updateSettingsNormalizeToStableChannel() {
+        // Murka VPN clients follow tagged releases; nightly builds are for testing.
+        assertEquals(ReleaseChannel.Stable, AppUpdateSettings().channel)
+        assertEquals(ReleaseChannel.Stable, AppUpdateSettings(channel = ReleaseChannel.Nightly).normalized().channel)
     }
 
     @Test
@@ -117,10 +117,10 @@ class AppUpdateServiceTest {
     @Test
     fun updateSettingsPersistAndDueCheckUsesInterval() {
         val settings = AppUpdateSettings(
-            channel = ReleaseChannel.Nightly,
+            channel = ReleaseChannel.Stable,
             intervalHours = 6,
             lastCheckAtEpochMs = 1_000L,
-            lastSeenUpdateVersion = "Nightly:nightly:apk"
+            lastSeenUpdateVersion = "Stable:1.0.5:apk"
         )
         val store = InMemoryAppUpdateSettingsStore()
 
