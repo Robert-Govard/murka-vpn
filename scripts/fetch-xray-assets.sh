@@ -16,7 +16,11 @@ curl -fsSL -o "$tmp/$ZIP" "$URL"
 curl -fsSL -o "$tmp/$ZIP.dgst" "$URL.dgst"
 
 want="$(grep -i '^SHA2-256' "$tmp/$ZIP.dgst" | sed -E 's/.*= *//' | tr 'A-F' 'a-f')"
-got="$(shasum -a 256 "$tmp/$ZIP" | cut -d' ' -f1)"
+if command -v sha256sum >/dev/null 2>&1; then
+  got="$(sha256sum "$tmp/$ZIP" | cut -d' ' -f1)"
+else
+  got="$(shasum -a 256 "$tmp/$ZIP" | cut -d' ' -f1)"
+fi
 if [ -z "$want" ] || [ "$want" != "$got" ]; then
   echo "checksum mismatch for $ZIP: want '$want', got '$got'" >&2
   exit 1
