@@ -1,5 +1,8 @@
 package org.olcbox.app.vpn
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,17 +13,18 @@ import xraymobile.Xraymobile
 import java.net.ServerSocket
 
 internal object OlcRtcConnectionChecker {
-    suspend fun check(locationConfig: LocationConfig, deviceId: String): Long? {
+    suspend fun check(context: Context, locationConfig: LocationConfig, deviceId: String): Long? {
         return withContext(Dispatchers.IO) {
             val config = locationConfig.normalized()
             if (!config.isComplete()) return@withContext null
             if (config.isXray) return@withContext xrayCheck(config, CONNECTION_CHECK_TIMEOUT_MS)
 
+            val dnsServer = signalingDnsServer(context, config.dnsServer)
             repeat(CONNECTION_CHECK_ATTEMPTS) {
                 val socksPort = allocateLocalPort()
 
                 val result: Long? = runCatching {
-                    Mobile.new_().check(
+                    runtime(dnsServer).check(
                         config.bypassProvider,
                         config.transport,
                         config.id,
@@ -42,17 +46,18 @@ internal object OlcRtcConnectionChecker {
         }
     }
 
-    suspend fun ping(locationConfig: LocationConfig, deviceId: String): Long? {
+    suspend fun ping(context: Context, locationConfig: LocationConfig, deviceId: String): Long? {
         return withContext(Dispatchers.IO) {
             val config = locationConfig.normalized()
             if (!config.isComplete()) return@withContext null
             if (config.isXray) return@withContext xrayCheck(config, HTTP_PING_TIMEOUT_MS)
 
+            val dnsServer = signalingDnsServer(context, config.dnsServer)
             repeat(HTTP_PING_ATTEMPTS) {
                 val socksPort = allocateLocalPort()
 
                 val result: Long? = runCatching {
-                    Mobile.new_().ping(
+                    runtime(dnsServer).ping(
                         config.bypassProvider,
                         config.transport,
                         config.id,
@@ -75,6 +80,31 @@ internal object OlcRtcConnectionChecker {
 
             null
         }
+    }
+
+    private fun runtime(dnsServer: String?) = Mobile.new_().apply {
+        if (dnsServer != null) setDNS(dnsServer)
+    }
+
+    /**
+     * Same DNS choice as the VPN service: the core's built-in 8.8.8.8 often gets no
+     * answer under whitelists, while the carrier's or router's DNS does.
+     */
+    private fun signalingDnsServer(context: Context, configuredDnsServer: String): String? {
+        if (configuredDnsServer.isNotBlank()) return configuredDnsServer
+        val connectivityManager = context.getSystemService(ConnectivityManager::class.java) ?: return null
+        val active = connectivityManager.activeNetwork
+        val upstream = (listOfNotNull(active) + connectivityManager.allNetworks).firstOrNull { network ->
+            val caps = connectivityManager.getNetworkCapabilities(network) ?: return@firstOrNull false
+            !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } ?: return null
+        return connectivityManager.getLinkProperties(upstream)
+            ?.dnsServers
+            ?.filterNot { it.isAnyLocalAddress || it.isLoopbackAddress || it.isMulticastAddress }
+            ?.sortedBy { it.address.size }
+            ?.firstNotNullOfOrNull { it.hostAddress }
+            ?.let { if (':' in it) "[$it]:53" else "$it:53" }
     }
 
     /** Remnawave server: fetch the ping URL through a temporary Xray. */

@@ -55,6 +55,12 @@ internal interface OlcRtcNativeLib : Library {
      *
      * Returns -1 on error.
      */
+    /**
+     * SetDNS sets the DNS server (host:port) used by later Ping and Check calls.
+     * Returns 0, or -1 for an invalid address.
+     */
+    fun SetDNS(dnsServer: String): Long
+
     fun Ping(
         carrierName: String,
         transportName: String,

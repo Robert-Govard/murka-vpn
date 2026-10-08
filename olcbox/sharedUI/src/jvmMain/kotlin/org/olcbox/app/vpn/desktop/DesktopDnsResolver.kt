@@ -70,15 +70,22 @@ internal object DesktopDnsResolver {
             .firstOrNull { it != LinuxTunController.TUN_NAME }
     }
 
-    /** First non-loopback `nameserver[n]` of the first resolver in `scutil --dns`. */
+    /**
+     * First non-loopback `nameserver[n]` in `scutil --dns`, scanning resolvers in order
+     * and skipping per-domain ones. When another VPN client owns DNS, the main resolver
+     * can have no nameserver at all; the system one is then only listed among the
+     * "for scoped queries" resolvers further down.
+     */
     internal fun selectMacDnsServer(scutilOutput: String): String? {
-        val firstResolver = scutilOutput.substringAfter("resolver #1", missingDelimiterValue = "")
-            .substringBefore("resolver #2")
-        val servers = firstResolver.lineSequence()
-            .mapNotNull { MAC_NAMESERVER.find(it)?.groupValues?.get(1) }
-            .mapNotNull(::ipLiteralOrNull)
-            .toList()
-        val selected = servers.firstOrNull { !isLoopback(it) } ?: return null
+        val selected = scutilOutput.split(MAC_RESOLVER_HEADER)
+            .drop(1)
+            .filterNot { block -> block.lineSequence().any { MAC_DOMAIN.containsMatchIn(it) } }
+            .flatMap { block ->
+                block.lineSequence()
+                    .mapNotNull { MAC_NAMESERVER.find(it)?.groupValues?.get(1) }
+                    .mapNotNull(::ipLiteralOrNull)
+            }
+            .firstOrNull { !isLoopback(it) } ?: return null
         return dnsEndpoint(selected)
     }
 
@@ -155,5 +162,7 @@ internal object DesktopDnsResolver {
 
     private val DEFAULT_ROUTE_DEVICE = Regex("(?:^|\\s)dev\\s+(\\S+)")
     private val MAC_NAMESERVER = Regex("nameserver\\[\\d+\\]\\s*:\\s*(\\S+)")
+    private val MAC_RESOLVER_HEADER = Regex("(?m)^resolver #\\d+")
+    private val MAC_DOMAIN = Regex("^\\s*domain\\s*:")
     private const val COMMAND_TIMEOUT_SECONDS = 2L
 }

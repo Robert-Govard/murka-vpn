@@ -249,6 +249,7 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
 
     override suspend fun ping(locationConfig: LocationConfig): Long? {
         return OlcRtcConnectionChecker.ping(
+            context = appContext,
             locationConfig = locationConfig,
             deviceId = deviceIdentityProvider.hwid()
         )
@@ -256,6 +257,7 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
 
     override suspend fun checkConnection(locationConfig: LocationConfig): Long? {
         return OlcRtcConnectionChecker.check(
+            context = appContext,
             locationConfig = locationConfig,
             deviceId = deviceIdentityProvider.hwid()
         )

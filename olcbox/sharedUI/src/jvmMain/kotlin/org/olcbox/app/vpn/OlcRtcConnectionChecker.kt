@@ -47,6 +47,7 @@ internal object OlcRtcConnectionChecker {
                 repeat(CONNECTION_CHECK_ATTEMPTS) {
                     val socksPort = allocateLocalPort()
                     val result = runCatching {
+                        applySystemDns(nativeLib)
                         val latency = nativeLib.Check(
                             config.bypassProvider,
                             config.transport,
@@ -100,6 +101,7 @@ internal object OlcRtcConnectionChecker {
                 repeat(HTTP_PING_ATTEMPTS) {
                     val socksPort = allocateLocalPort()
                     val result = runCatching {
+                        applySystemDns(nativeLib)
                         val latency = nativeLib.Ping(
                             config.bypassProvider,
                             config.transport,
@@ -329,6 +331,22 @@ internal object OlcRtcConnectionChecker {
         error("olcRTC start timed out")
     }
 
+    @Volatile
+    private var systemDnsAppliedAt = 0L
+
+    /**
+     * The native library defaults to 8.8.8.8, which may not answer under
+     * whitelists or behind another VPN client; give it the system resolver.
+     * Re-read at most every 30 s (PowerShell is slow to start on Windows).
+     */
+    private fun applySystemDns(nativeLib: OlcRtcNativeLib) {
+        val now = System.currentTimeMillis()
+        if (now - systemDnsAppliedAt < SYSTEM_DNS_REFRESH_MS) return
+        runCatching { nativeLib.SetDNS(DesktopDnsResolver.current()) }
+            .onSuccess { if (it == 0L) systemDnsAppliedAt = now }
+            .onFailure { println("OlcRtcConnectionChecker: SetDNS failed: ${it.message}") }
+    }
+
     /** Remnawave server: ping through a temporary xray process without routing rules. */
     private suspend fun xrayCheck(config: LocationConfig): Long? {
         val port = allocateLocalPort()
@@ -420,6 +438,7 @@ internal object OlcRtcConnectionChecker {
     }
 
     private const val CONNECTION_CHECK_ATTEMPTS = 2
+    private const val SYSTEM_DNS_REFRESH_MS = 30_000L
     private const val HTTP_PING_ATTEMPTS = 1
 
     private const val OLC_READY_TIMEOUT_MS = 8_000L
