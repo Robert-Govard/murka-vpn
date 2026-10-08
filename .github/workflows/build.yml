@@ -1,0 +1,161 @@
+name: Build Murka VPN
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_NDK_VERSION: "28.2.13676358"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      code: ${{ steps.v.outputs.code }}
+    steps:
+      - id: v
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="1.0.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      VERSION_CODE: ${{ needs.version.outputs.code }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: murka-core/go.mod
+          cache-dependency-path: |
+            murka-core/go.sum
+            olcrtc/go.sum
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK packages
+        run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;${ANDROID_NDK_VERSION}"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: gomobile
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install golang.org/x/mobile/cmd/gomobile@latest golang.org/x/mobile/cmd/gobind@latest
+          ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" "$(go env GOPATH)/bin/gomobile" init
+      - name: Xray geo assets
+        run: olcbox/scripts/fetch-xray-assets.sh
+      - name: Android signing
+        working-directory: olcbox
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > release-keystore.jks
+          printf 'storeFile=release-keystore.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
+      - name: Test and build APKs
+        working-directory: olcbox
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}"
+          props="-Polcbox.version=${VERSION} -Polcbox.versionCode=${VERSION_CODE}"
+          mkdir -p dist
+          ./gradlew $props :sharedUI:jvmTest :androidApp:assembleRelease --stacktrace
+          cp "$(find androidApp/build/outputs/apk/release -name '*.apk' | head -n1)" "dist/MurkaVPN-${VERSION}-android-universal.apk"
+          ./gradlew $props -Polcbox.android.abiFilters=arm64-v8a :androidApp:clean :androidApp:assembleRelease --stacktrace
+          cp "$(find androidApp/build/outputs/apk/release -name '*.apk' | head -n1)" "dist/MurkaVPN-${VERSION}-android-arm64-v8a.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: olcbox/dist/*.apk
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: murka-core/go.mod
+          cache-dependency-path: |
+            murka-core/go.sum
+            olcrtc/go.sum
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Xray geo assets
+        shell: bash
+        run: olcbox/scripts/fetch-xray-assets.sh
+      - name: Build installers
+        working-directory: olcbox
+        shell: pwsh
+        run: |
+          .\gradlew.bat "-Polcbox.version=$env:VERSION" :desktopApp:packageReleaseExe :desktopApp:packageReleaseMsi :desktopApp:packageReleasePortableZip --stacktrace
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Get-ChildItem -Recurse desktopApp/build -Include *.exe,*.msi |
+            Where-Object { $_.FullName -match 'binaries\\main-release\\(exe|msi)' } |
+            ForEach-Object { Copy-Item $_.FullName "dist/MurkaVPN-$env:VERSION-windows-amd64$($_.Extension)" }
+          Get-ChildItem -Recurse desktopApp/build -Filter "*-windows-amd64-portable.zip" |
+            ForEach-Object { Copy-Item $_.FullName "dist/MurkaVPN-$env:VERSION-windows-amd64-portable.zip" }
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: olcbox/dist/*
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: murka-core/go.mod
+          cache-dependency-path: |
+            murka-core/go.sum
+            olcrtc/go.sum
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Xray geo assets
+        run: olcbox/scripts/fetch-xray-assets.sh
+      - name: Build DMG
+        working-directory: olcbox
+        run: |
+          ./gradlew -Polcbox.version="${VERSION}" :desktopApp:packageReleaseDmg --stacktrace
+          mkdir -p dist
+          cp "$(find desktopApp/build/compose/binaries/main-release/dmg -name '*.dmg' | head -n1)" "dist/MurkaVPN-${VERSION}-macos-arm64.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: olcbox/dist/*.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, android, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --title "Мурка VPN ${GITHUB_REF_NAME}" --notes "Build ${GITHUB_RUN_NUMBER}"
