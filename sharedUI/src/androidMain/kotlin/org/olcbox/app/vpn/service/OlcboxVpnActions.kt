@@ -12,4 +12,8 @@ object OlcboxVpnActions {
     const val EXTRA_SPLIT_TUNNEL_MODE = "org.olcbox.app.vpn.service.OlcboxVpnService.SPLIT_TUNNEL_MODE"
     const val EXTRA_SPLIT_TUNNEL_PROXY_APPS = "org.olcbox.app.vpn.service.OlcboxVpnService.SPLIT_TUNNEL_PROXY_APPS"
     const val EXTRA_SPLIT_TUNNEL_BYPASS_APPS = "org.olcbox.app.vpn.service.OlcboxVpnService.SPLIT_TUNNEL_BYPASS_APPS"
+
+    /** Murka VPN hint button: select this location and reconnect. */
+    const val ACTION_SWITCH_LOCATION = "org.olcbox.app.vpn.service.OlcboxVpnService.SWITCH_LOCATION"
+    const val EXTRA_STORAGE_ID = "org.olcbox.app.vpn.service.OlcboxVpnService.STORAGE_ID"
 }
