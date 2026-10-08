@@ -182,22 +182,6 @@ fun LocationSelectorScreen(
                 }
             }
 
-            FilledTonalButton(
-                onClick = onAddLocationClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "Добавить свой сервер",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
             if (subscriptionLocations.isEmpty()) {
                 FilledTonalButton(
                     onClick = onAddSubscriptionClick,
@@ -229,7 +213,7 @@ private fun RelaySetupCard(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = "Добавить сервер",
+            text = "Начните с подписки",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.SemiBold,
@@ -238,17 +222,10 @@ private fun RelaySetupCard(
 
         SetupActionRow(
             title = "Добавить подписку",
-            subtitle = "Scan QR, paste URI, or import file",
+            subtitle = "QR-код, ссылка или файл",
             icon = Icons.Outlined.QrCodeScanner,
             prominent = true,
             onClick = onAddSubscriptionClick
-        )
-
-        SetupActionRow(
-            title = "Свой сервер olcRTC",
-            subtitle = "Комната, ключ, сервис и транспорт",
-            icon = Icons.Outlined.Add,
-            onClick = onAddLocationClick
         )
     }
 }
@@ -407,6 +384,8 @@ private fun LocationSelectorRow(
         isLoading = isLoading,
         isError = isOffline,
         pingMs = pingMs,
+        // Subscription servers are managed by the subscription; only manual ones are editable.
+        settingsEnabled = location.subscriptionUrl.isNullOrBlank(),
         onSettingsClick = {
             onLocationSettingsClick(location.storageId)
         },

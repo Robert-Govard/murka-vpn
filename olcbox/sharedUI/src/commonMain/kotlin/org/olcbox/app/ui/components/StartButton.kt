@@ -92,7 +92,7 @@ fun StartButton(
         ) {
             Icon(
                 imageVector = Icons.Rounded.PowerSettingsNew,
-                contentDescription = "Start Icon",
+                contentDescription = "Кнопка запуска",
                 tint = contentColor.copy(alpha = if (isLoading || !enabled) 0.5f else 1f),
                 modifier = Modifier.size(48.dp)
             )

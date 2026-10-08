@@ -103,13 +103,6 @@ fun AddConfigurationSheet(
                         onClick = onUpdateSubscriptionsClick
                     )
                 }
-
-                AddSheetAction(
-                    title = "Свой сервер olcRTC",
-                        value = "Комната, ключ, сервис и транспорт",
-                    icon = Icons.Outlined.Add,
-                    onClick = onAddCustomLocationClick
-                )
             }
         }
     }
