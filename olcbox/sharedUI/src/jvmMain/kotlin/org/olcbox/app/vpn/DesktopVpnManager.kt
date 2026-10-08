@@ -28,6 +28,7 @@ import org.olcbox.app.vpn.desktop.DesktopNativeAssets
 import org.olcbox.app.vpn.desktop.DesktopDnsResolver
 import org.olcbox.app.vpn.desktop.DesktopProxyController
 import org.olcbox.app.vpn.desktop.LinuxPrivilege
+import org.olcbox.app.vpn.desktop.DesktopLogFile
 import org.olcbox.app.vpn.desktop.LinuxTunController
 import org.olcbox.app.vpn.desktop.MacTunController
 import org.olcbox.app.vpn.desktop.OlcRtcCommand
@@ -81,6 +82,7 @@ class DesktopVpnManager private constructor(
     private val linuxTunController = LinuxTunController(::addLog)
     private val windowsTunController = WindowsTunController(::addLog)
     private val macTunController = MacTunController(::addLog)
+    private val logFile = DesktopLogFile(DesktopPaths.appDataDir().resolve("murka.log"))
 
     override fun needsPermission(): Boolean = false
 
@@ -874,6 +876,7 @@ class DesktopVpnManager private constructor(
     }
 
     private fun addLog(message: String) {
+        logFile.append(message)
         _logs.update {
             (it + message).takeLast(MAX_LOG_ENTRIES)
         }
