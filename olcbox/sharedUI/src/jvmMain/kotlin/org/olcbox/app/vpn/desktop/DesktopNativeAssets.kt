@@ -2,6 +2,7 @@ package org.olcbox.app.vpn.desktop
 
 import org.olcbox.app.desktop.DesktopOs
 import org.olcbox.app.desktop.DesktopPaths
+import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -56,8 +57,15 @@ internal object DesktopNativeAssets {
         }
     }
 
-    /** Xray binary for Remnawave locations (built from murka-core). */
-    fun resolveXrayBinary(): Path {
+    /**
+     * Xray binary for Remnawave locations (built from murka-core). Installed once
+     * per app run: pinging all servers starts several checks at the same time.
+     */
+    fun resolveXrayBinary(): Path = xrayBinary
+
+    private val xrayBinary: Path by lazy { installXrayBinary() }
+
+    private fun installXrayBinary(): Path {
         val names = when (DesktopPaths.os) {
             DesktopOs.MacOS -> listOf("xray-darwin-${desktopArch()}", "xray-darwin-${desktopArchFallback()}")
             DesktopOs.Windows -> listOf("xray-windows-amd64.exe")
@@ -75,13 +83,17 @@ internal object DesktopNativeAssets {
      * binary, Xray's default asset location, so privileged launches that drop
      * XRAY_LOCATION_ASSET still find them.
      */
-    fun resolveXrayAssetsDir(): Path {
+    fun resolveXrayAssetsDir(): Path = xrayAssetsDir
+
+    private val xrayAssetsDir: Path by lazy { installXrayAssets() }
+
+    private fun installXrayAssets(): Path {
         val dir = DesktopPaths.appDataDir().resolve("bin")
         Files.createDirectories(dir)
         for (name in listOf("geoip.dat", "geosite.dat")) {
             val resource = javaClass.classLoader.getResourceAsStream("native/xray/$name")
                 ?: error("Bundled Xray asset is missing: native/xray/$name")
-            resource.use { Files.copy(it, dir.resolve(name), StandardCopyOption.REPLACE_EXISTING) }
+            resource.use { installAtomically(it, dir.resolve(name), executable = false) }
         }
         return dir
     }
@@ -106,6 +118,28 @@ internal object DesktopNativeAssets {
         return binary
     }
 
+    /**
+     * Writes [input] to a temp file next to [target] and moves it into place in
+     * one step, so a concurrent reader or exec never sees a partial file and a
+     * running process keeps its old copy.
+     */
+    internal fun installAtomically(input: InputStream, target: Path, executable: Boolean) {
+        Files.createDirectories(target.parent)
+        val temp = Files.createTempFile(target.parent, ".${target.fileName}-", ".tmp")
+        try {
+            Files.copy(input, temp, StandardCopyOption.REPLACE_EXISTING)
+            // Identical file already in place: keep it (Windows cannot replace a running .exe).
+            if (Files.isRegularFile(target) && Files.mismatch(temp, target) == -1L) {
+                if (executable) makeExecutable(target)
+                return
+            }
+            if (executable) makeExecutable(temp)
+            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(temp)
+        }
+    }
+
     private fun resolveBinary(
         fileName: String,
         resourceName: String,
@@ -116,16 +150,12 @@ internal object DesktopNativeAssets {
 
         val resource = javaClass.classLoader.getResourceAsStream(resourceName)
         if (resource != null) {
-            resource.use {
-                Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING)
-            }
-            makeExecutable(target)
+            resource.use { installAtomically(it, target, executable = true) }
             return target
         }
 
-        candidates.firstOrNull { it.exists() }?.let {
-            Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING)
-            makeExecutable(target)
+        candidates.firstOrNull { it.exists() }?.let { source ->
+            Files.newInputStream(source).use { installAtomically(it, target, executable = true) }
             return target
         }
 
@@ -205,9 +235,7 @@ internal object DesktopNativeAssets {
         val resourceName = "native/$fileName"
         val resource = javaClass.classLoader.getResourceAsStream(resourceName)
         if (resource != null) {
-            resource.use {
-                Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING)
-            }
+            resource.use { installAtomically(it, target, executable = false) }
             return target
         }
 
