@@ -102,9 +102,9 @@ fun HomeScreen(
     }
 
     val primaryActionLabel = when {
-        requiresSetup -> "SETUP"
-        state.isVpnLoading || state.isVpnConnected -> "STOP"
-        else -> "START"
+        requiresSetup -> "НАСТРОИТЬ"
+        state.isVpnLoading || state.isVpnConnected -> "СТОП"
+        else -> "СТАРТ"
     }
 
     fun refreshSubscriptions() {
@@ -113,9 +113,9 @@ fun HomeScreen(
                 viewModel.restartVpnIfRunning()
 
                 val message = if (updatedCount > 0) {
-                    "Subscriptions updated: $updatedCount"
+                    "Обновлено подписок: $updatedCount"
                 } else {
-                    "No subscriptions to update"
+                    "Нет подписок для обновления"
                 }
 
                 scope.launch {
@@ -146,9 +146,9 @@ fun HomeScreen(
                     scope.launch {
                         snackbarHostState.showSnackbar(
                             if (updatedCount > 0) {
-                                "Subscription updated"
+                                "Подписка обновлена"
                             } else {
-                                "Subscription is already up to date"
+                                "Подписка уже актуальна"
                             }
                         )
                     }
@@ -157,7 +157,7 @@ fun HomeScreen(
             onError = { message ->
                 updatingSubscriptionUrl = null
                 scope.launch {
-                    snackbarHostState.showSnackbar("Could not update subscription: $message")
+                    snackbarHostState.showSnackbar("Не удалось обновить подписку: $message")
                 }
             }
         )
@@ -325,13 +325,13 @@ fun HomeScreen(
                     manualSubscriptionRefresh = ""
                     manualSubscriptionAllowInsecure = false
                 },
-                title = { Text("Import link or URI") },
+                title = { Text("Добавить подписку") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(
                             value = manualImportText,
                             onValueChange = { manualImportText = it },
-                            label = { Text("HTTP, HTTPS, or olcrtc URI") },
+                            label = { Text("Ссылка на подписку или olcrtc://") },
                             placeholder = { Text("https://example.org/subscription") },
                             minLines = 3,
                             maxLines = 6,
@@ -346,14 +346,14 @@ fun HomeScreen(
                                         .filter { it.isDigit() || it in "smhd" }
                                         .take(8)
                                 },
-                                label = { Text("Subscription refresh rate") },
-                                placeholder = { Text("Auto") },
+                                label = { Text("Период обновления") },
+                                placeholder = { Text("Авто") },
                                 supportingText = {
                                     Text(
                                         if (subscriptionRefreshError) {
-                                            "Use 5m–30d, for example 10m, 6h, or 1d"
+                                            "От 5m до 30d, например 10m, 6h или 1d"
                                         } else {
-                                            "Optional. Empty implies default."
+                                            "Необязательно. Пусто — по умолчанию."
                                         }
                                     )
                                 },
@@ -369,7 +369,7 @@ fun HomeScreen(
                                     checked = manualSubscriptionAllowInsecure,
                                     onCheckedChange = { manualSubscriptionAllowInsecure = it }
                                 )
-                                Text("Allow insecure requests")
+                                Text("Разрешить HTTP без шифрования")
                             }
                         }
                     }
@@ -391,7 +391,7 @@ fun HomeScreen(
                                         viewModel.loadCurrentConfig()
                                     }
                                     scope.launch {
-                                        snackbarHostState.showSnackbar("Configuration imported")
+                                        snackbarHostState.showSnackbar("Подписка добавлена")
                                     }
                                 },
                                 onError = { message ->
@@ -402,7 +402,7 @@ fun HomeScreen(
                             )
                         }
                     ) {
-                        Text("Import")
+                        Text("Добавить")
                     }
                 },
                 dismissButton = {
@@ -420,7 +420,7 @@ fun HomeScreen(
                             )
                         }
                     ) {
-                        Text("Paste clipboard")
+                        Text("Вставить из буфера")
                     }
                 }
             )

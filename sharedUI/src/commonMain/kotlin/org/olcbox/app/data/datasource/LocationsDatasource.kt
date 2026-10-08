@@ -492,25 +492,25 @@ class LocationsRepositoryImpl(
         if (input.isBlank()) {
             return ResolvedImportResult.Failure(
                 LocationImportFailureKind.EmptyInput,
-                "Enter a subscription URL, olcrtc URI, or configuration text"
+                "Вставьте ссылку на подписку"
             )
         }
         if (input.looksLikeUnsupportedUrl()) {
             return ResolvedImportResult.Failure(
                 LocationImportFailureKind.InvalidUrl,
-                "Only HTTP, HTTPS, and olcrtc URIs are supported"
+                "Поддерживаются ссылки HTTP, HTTPS и olcrtc://"
             )
         }
         if (input.isHttpUrl() && !input.isValidHttpUrl()) {
             return ResolvedImportResult.Failure(
                 LocationImportFailureKind.InvalidUrl,
-                "Enter a valid HTTP or HTTPS subscription URL"
+                "Проверьте ссылку: нужна HTTP или HTTPS"
             )
         }
         if (input.startsWith("http://", ignoreCase = true) && !allowInsecureRequests) {
             return ResolvedImportResult.Failure(
                 LocationImportFailureKind.InvalidUrl,
-                "Enable Allow insecure requests to import an HTTP subscription"
+                "Для подписки по HTTP включите «Разрешить HTTP без шифрования»"
             )
         }
         var sourceResult = resolveImportSourceDetailed(
@@ -537,7 +537,7 @@ class LocationsRepositoryImpl(
             return lastFailure?.toResolvedFailure()
                 ?: ResolvedImportResult.Failure(
                     LocationImportFailureKind.Network,
-                    "Could not download the subscription"
+                    "Не удалось скачать подписку"
                 )
         }
 
@@ -572,9 +572,9 @@ class LocationsRepositoryImpl(
                 ?: ResolvedImportResult.Failure(
                     LocationImportFailureKind.UnsupportedFormat,
                     if (input.isHttpUrl()) {
-                        "The server responded, but the body is not a supported configuration"
+                        "Сервер ответил, но это не подписка, которую понимает приложение"
                     } else {
-                        "The text is not a supported configuration"
+                        "Этот текст не похож на подписку или конфигурацию"
                     }
                 )
         }
@@ -709,7 +709,7 @@ class LocationsRepositoryImpl(
         if (text.isBlank()) {
             return ImportSourceResult.Failure(
                 LocationImportFailureKind.EmptyInput,
-                "No configuration text found"
+                "Нет текста конфигурации"
             )
         }
 
@@ -791,7 +791,7 @@ class LocationsRepositoryImpl(
                 if (response.status.value !in 200..299) {
                     return@withProxyAuthentication DownloadSubscriptionResult.Failure(
                         LocationImportFailureKind.Http,
-                        "Subscription server returned HTTP ${response.status.value}"
+                        "Сервер подписки ответил HTTP ${response.status.value}"
                     )
                 }
 
@@ -804,7 +804,7 @@ class LocationsRepositoryImpl(
                 if (content.isBlank()) {
                     return@withProxyAuthentication DownloadSubscriptionResult.Failure(
                         LocationImportFailureKind.EmptyResponse,
-                        "Subscription server returned an empty response"
+                        "Сервер подписки вернул пустой ответ"
                     )
                 }
 
@@ -866,17 +866,17 @@ class LocationsRepositoryImpl(
                 it in diagnostic
             } -> DownloadSubscriptionResult.Failure(
                 LocationImportFailureKind.Tls,
-                "TLS certificate validation failed"
+                "Ошибка проверки сертификата TLS"
             )
             "timeout" in diagnostic || "timed out" in diagnostic -> {
                 DownloadSubscriptionResult.Failure(
                     LocationImportFailureKind.Timeout,
-                    "Subscription request timed out"
+                    "Сервер подписки не ответил вовремя"
                 )
             }
             else -> DownloadSubscriptionResult.Failure(
                 LocationImportFailureKind.Network,
-                "Could not connect to the subscription server"
+                "Не удалось подключиться к серверу подписки"
             )
         }
     }

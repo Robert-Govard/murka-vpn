@@ -18,7 +18,7 @@ fun IosSocksOnboardingDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Connect apps through Olcbox") },
+        title = { Text("Подключение приложений") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -35,12 +35,12 @@ fun IosSocksOnboardingDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Got it")
+                Text("Понятно")
             }
         },
         dismissButton = {
             TextButton(onClick = onCopy) {
-                Text("Copy settings")
+                Text("Скопировать настройки")
             }
         }
     )
@@ -48,8 +48,8 @@ fun IosSocksOnboardingDialog(
 
 fun socksSettingsText(settings: ApplicationSocksProxySettings): String = buildString {
     appendLine("Type: SOCKS5")
-    appendLine("Server: ${settings.host}")
-    appendLine("Port: ${settings.port}")
-    appendLine("Username: ${settings.username}")
-    append("Password: ${settings.password}")
+    appendLine("Сервер: ${settings.host}")
+    appendLine("Порт: ${settings.port}")
+    appendLine("Логин: ${settings.username}")
+    append("Пароль: ${settings.password}")
 }

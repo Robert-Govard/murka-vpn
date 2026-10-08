@@ -93,7 +93,7 @@ fun LocationSelectorScreen(
                                 isRefreshing = isGroupRefreshing,
                                 onClick = { onRefreshClick(groupIds) },
                                 tint = MaterialTheme.colorScheme.primary,
-                                label = "Ping",
+                                label = "Пинг",
                                 icon = Icons.Outlined.Bolt,
                                 enabled = updatingSubscriptionUrl == null
                             )
@@ -107,7 +107,7 @@ fun LocationSelectorScreen(
                                         isRefreshing = updatingSubscriptionUrl == subscriptionUrl,
                                         onClick = { onSubscriptionUpdateClick(subscriptionUrl) },
                                         tint = MaterialTheme.colorScheme.primary,
-                                        label = "Update",
+                                        label = "Обновить",
                                         icon = Icons.Outlined.Refresh,
                                         enabled = updatingSubscriptionUrl == null && !isGroupRefreshing
                                     )
@@ -148,7 +148,7 @@ fun LocationSelectorScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         LocationGroupHeader(
-                            title = "Custom locations",
+                            title = "Свои серверы",
                             modifier = Modifier.weight(1f)
                         )
 
@@ -161,7 +161,7 @@ fun LocationSelectorScreen(
                             isRefreshing = isCustomRefreshing,
                             onClick = { onRefreshClick(customIds) },
                             tint = MaterialTheme.colorScheme.primary,
-                            label = "Ping",
+                            label = "Пинг",
                             icon = Icons.Outlined.Bolt
                         )
                     }
@@ -192,7 +192,7 @@ fun LocationSelectorScreen(
                 Icon(Icons.Rounded.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "Add custom location",
+                    text = "Добавить свой сервер",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -209,7 +209,7 @@ fun LocationSelectorScreen(
                     Icon(Icons.Rounded.Add, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "Add subscription",
+                        text = "Добавить подписку",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -229,7 +229,7 @@ private fun RelaySetupCard(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = "Add relay setup",
+            text = "Добавить сервер",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.SemiBold,
@@ -237,7 +237,7 @@ private fun RelaySetupCard(
         )
 
         SetupActionRow(
-            title = "Add subscription",
+            title = "Добавить подписку",
             subtitle = "Scan QR, paste URI, or import file",
             icon = Icons.Outlined.QrCodeScanner,
             prominent = true,
@@ -245,8 +245,8 @@ private fun RelaySetupCard(
         )
 
         SetupActionRow(
-            title = "Create custom location",
-            subtitle = "Enter room, key, provider, and transport",
+            title = "Свой сервер olcRTC",
+            subtitle = "Комната, ключ, сервис и транспорт",
             icon = Icons.Outlined.Add,
             onClick = onAddLocationClick
         )
@@ -354,7 +354,7 @@ private fun SubscriptionGroupHeader(
     modifier: Modifier = Modifier
 ) {
     val first = locations.firstOrNull()
-    val title = first?.subscriptionTitle().orEmpty().ifBlank { "Subscriptions" }
+    val title = first?.subscriptionTitle().orEmpty().ifBlank { "Подписки" }
     val description = first?.subscriptionDescription()
     val details = first?.subscriptionDetails()
 
@@ -470,7 +470,7 @@ private fun LocationItem.subscriptionTitle(): String {
 
     return listOfNotNull(
         subscription?.icon?.takeIf { it.isNotBlank() },
-        subscription?.name?.takeIf { it.isNotBlank() } ?: "Subscriptions"
+        subscription?.name?.takeIf { it.isNotBlank() } ?: "Подписки"
     ).joinToString(" ")
 }
 
@@ -480,7 +480,7 @@ private fun LocationItem.subscriptionDetails(): String? {
 
     return listOfNotNull(
         quotaText(subscription.used, subscription.available).takeUnless { hasProgressQuota },
-        subscription.refresh?.takeIf { it.isNotBlank() }?.let { "Refresh $it" }
+        subscription.refresh?.takeIf { it.isNotBlank() }?.let { "Обновление: $it" }
     ).joinToString(" · ").takeIf { it.isNotBlank() }
 }
 
@@ -491,9 +491,9 @@ private fun LocationItem.subscriptionDescription(): String? {
 
 private fun quotaText(used: String?, available: String?): String? {
     return when {
-        !used.isNullOrBlank() && !available.isNullOrBlank() -> "$used used · $available available"
-        !used.isNullOrBlank() -> "$used used"
-        !available.isNullOrBlank() -> "$available available"
+        !used.isNullOrBlank() && !available.isNullOrBlank() -> "использовано $used · доступно $available"
+        !used.isNullOrBlank() -> "использовано $used"
+        !available.isNullOrBlank() -> "доступно $available"
         else -> null
     }
 }

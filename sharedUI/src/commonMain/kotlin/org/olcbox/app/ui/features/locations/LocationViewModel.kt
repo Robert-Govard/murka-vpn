@@ -238,7 +238,7 @@ class LocationViewModel(
                 } catch (e: Exception) {
                     activePingJobs.remove(location.storageId)
 
-                    val message = e.message ?: "HTTP ping failed"
+                    val message = e.message ?: "Пинг не прошёл"
                     onError(message)
 
                     emitPingState()
@@ -427,28 +427,28 @@ class LocationViewModel(
 
     private fun validateName(name: String) {
         nameError = when {
-            name.isBlank() -> "Name cannot be empty"
-            name.length > 30 -> "Name is too long (max 30 chars)"
+            name.isBlank() -> "Введите название"
+            name.length > 30 -> "Слишком длинное название (до 30 символов)"
             else -> null
         }
     }
 
     private fun validateServer(server: String) {
         val roomLabel = if (editingConfig.bypassProvider == LocationConfig.PROVIDER_JITSI) {
-            "Room URL"
+            "Ссылка на комнату"
         } else {
-            "Room ID"
+            "ID комнаты"
         }
         serverError = when {
-            server.isBlank() -> "$roomLabel cannot be empty"
-            server.length > 256 -> "$roomLabel is too long"
+            server.isBlank() -> "$roomLabel: обязательное поле"
+            server.length > 256 -> "$roomLabel: слишком длинно"
             else -> null
         }
     }
 
     private fun validateKey(key: String) {
         keyError = when {
-            key.isBlank() -> "Key cannot be empty"
+            key.isBlank() -> "Введите ключ"
             !key.matches(Regex("^[a-fA-F0-9]{64}$")) -> "Key must be 64 hex characters"
             else -> null
         }
@@ -458,7 +458,7 @@ class LocationViewModel(
         dnsError = if (LocationConfig.isValidDnsServer(dnsServer)) {
             null
         } else {
-            "Use host:port or [IPv6]:port; leave empty for Auto"
+            "Формат host:port или [IPv6]:port; пусто — авто"
         }
     }
 

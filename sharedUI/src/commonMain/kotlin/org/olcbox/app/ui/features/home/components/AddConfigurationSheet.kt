@@ -64,8 +64,8 @@ fun AddConfigurationSheet(
                 .padding(bottom = 32.dp)
         ) {
             AddSheetHeader(
-                title = "Add connection",
-                subtitle = "Subscription or custom location"
+                title = "Добавить подключение",
+                subtitle = "Подписка или свой сервер"
             )
 
             Spacer(Modifier.height(20.dp))
@@ -73,31 +73,31 @@ fun AddConfigurationSheet(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (canScanQr) {
                     AddSheetAction(
-                        title = "Scan QR code",
-                        value = "Subscription or olcrtc URI",
+                        title = "Сканировать QR-код",
+                        value = "Подписка или olcrtc://",
                         icon = Icons.Outlined.QrCodeScanner,
                         onClick = onScanQrClick
                     )
                 }
 
                 AddSheetAction(
-                    title = "Enter link or URI",
+                    title = "Ввести ссылку",
                     value = "Type, edit, or import from clipboard",
                     icon = Icons.AutoMirrored.Outlined.Input,
                     onClick = onPasteLinkClick
                 )
 
                 AddSheetAction(
-                    title = "Import from file",
-                    value = "Read subscription or config file",
+                    title = "Из файла",
+                    value = "Подписка или файл конфигурации",
                     icon = Icons.Outlined.FileOpen,
                     onClick = onImportFileClick
                 )
 
                 if (hasSubscriptions) {
                     AddSheetAction(
-                        title = "Update subscriptions",
-                        value = "Refresh imported subscription locations",
+                        title = "Обновить подписки",
+                        value = "Загрузить свежие списки серверов",
                         icon = Icons.Outlined.Refresh,
                         showChevron = false,
                         onClick = onUpdateSubscriptionsClick
@@ -105,8 +105,8 @@ fun AddConfigurationSheet(
                 }
 
                 AddSheetAction(
-                    title = "Create custom location",
-                        value = "Enter room, key, provider, and transport",
+                    title = "Свой сервер olcRTC",
+                        value = "Комната, ключ, сервис и транспорт",
                     icon = Icons.Outlined.Add,
                     onClick = onAddCustomLocationClick
                 )

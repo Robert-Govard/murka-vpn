@@ -59,14 +59,14 @@ fun RelayStatus(
         else -> MaterialTheme.colorScheme.onSurface
     }
     val title = when {
-        isActive -> "Relay Active"
-        requiresSetup -> "Relay Inactive"
-        else -> "Relay Inactive"
+        isActive -> "Включён"
+        requiresSetup -> "Выключен"
+        else -> "Выключен"
     }
     val subtitle = when {
-        isActive -> "Connected"
-        requiresSetup -> "No location selected"
-        else -> "Disconnected"
+        isActive -> "Подключено"
+        requiresSetup -> "Сервер не выбран"
+        else -> "Не подключено"
     }
 
     Surface(
@@ -92,13 +92,13 @@ fun RelayStatus(
                         Icon(
                             tint = iconContentColor,
                             imageVector = Icons.Rounded.VerifiedUser,
-                            contentDescription = "Active"
+                            contentDescription = "Включён"
                         )
                     } else {
                         Icon(
                             tint = iconContentColor,
                             imageVector = Icons.Outlined.Shield,
-                            contentDescription = "Inactive"
+                            contentDescription = "Выключен"
                         )
                     }
                 }
