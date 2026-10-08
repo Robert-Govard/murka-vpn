@@ -247,11 +247,11 @@ internal class MacTunController(
             chmod 700 "${'$'}dir/hev" "${'$'}dir/up.sh"
             # Xray and olcRTC pin their sockets to the physical interface (IP_BOUND_IF). macOS
             # keeps a scoped default only for non-primary interfaces, so without this they get
-            # "network is unreachable" once the utun holds 0/1 + 128/1.
+            # "network is unreachable" once the utun holds 0/1 + 128/1. Do not probe with
+            # `route get -ifscope ... default`: it answers with the unscoped default. If a scoped
+            # default already exists the add fails ("File exists") and we leave it alone.
             added_scope=0
-            if ! ${paths.route} -n get -ifscope "${'$'}phys_if" default > /dev/null 2>&1; then
-              ${paths.route} -q -n add -ifscope "${'$'}phys_if" default "${'$'}phys_gw" && added_scope=1
-            fi
+            ${paths.route} -q -n add -ifscope "${'$'}phys_if" default "${'$'}phys_gw" > /dev/null 2>&1 && added_scope=1
             "${'$'}dir/hev" "${'$'}dir/hev.yml" > ${paths.log} 2>&1 &
             hev_pid=${'$'}!
             echo "${'$'}hev_pid" > ${paths.pid}

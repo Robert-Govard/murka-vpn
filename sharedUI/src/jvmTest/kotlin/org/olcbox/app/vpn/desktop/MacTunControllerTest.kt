@@ -140,11 +140,7 @@ class MacTunControllerTest {
         val dir = Files.createTempDirectory("murka-tun-test")
         try {
             val routeLog = dir.resolve("route.log")
-            // `route -n get` fails: no scoped default for en0, as when en0 is the primary interface.
-            val route = executable(
-                dir.resolve("route"),
-                "#!/bin/sh\nif [ \"$2\" = get ]; then exit 1; fi\necho \"$@\" >> '$routeLog'\n"
-            )
+            val route = executable(dir.resolve("route"), "#!/bin/sh\necho \"$@\" >> '$routeLog'\n")
             // Fake hev: run post-up-script from its config with a utun name, then idle.
             val hev = executable(
                 dir.resolve("hev"),
@@ -185,6 +181,45 @@ class MacTunControllerTest {
             assertFalse(Files.exists(Path.of(paths.ifName)))
             assertFalse(Files.exists(Path.of(paths.pid)))
             assertTrue(Files.list(dir).use { s -> s.noneMatch { it.fileName.toString().startsWith("murka-tun.") } })
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * Another VPN client already made en0 non-primary, so macOS has its own scoped default:
+     * our add fails with "File exists" and the helper must leave that route alone on stop.
+     */
+    @Test
+    fun helperKeepsExistingScopedDefault() {
+        if (!System.getProperty("os.name").startsWith("Mac")) return
+        val dir = Files.createTempDirectory("murka-tun-keep")
+        try {
+            val routeLog = dir.resolve("route.log")
+            val route = executable(
+                dir.resolve("route"),
+                "#!/bin/sh\necho \"$@\" >> '$routeLog'\ncase \"$*\" in *'add -ifscope'*) exit 1;; esac\n"
+            )
+            val hev = executable(
+                dir.resolve("hev"),
+                "#!/bin/sh\nup=$(sed -n 's/.*post-up-script: //p' \"$1\")\n\"\$up\" utun99\nexec sleep 60\n"
+            )
+            val config = dir.resolve("hev.yml")
+            Files.writeString(config, MacTunController.configContent(10808, "", "", udpOverTcp = false))
+            val paths = MacTunController.HelperPaths(
+                pid = dir.resolve("pid").toString(), ifName = dir.resolve("ifname").toString(),
+                log = dir.resolve("hev.log").toString(), route = route.toString(), tmpDir = dir.toString()
+            )
+            val helper = executable(dir.resolve("helper.sh"), MacTunController.helperScript(paths))
+            val stopFile = dir.resolve("stop")
+            val process = ProcessBuilder(
+                "/bin/sh", helper.toString(), hev.toString(), config.toString(),
+                ProcessHandle.current().pid().toString(), stopFile.toString(), "en0", "192.168.50.1"
+            ).redirectErrorStream(true).start()
+            waitUntil { Files.exists(Path.of(paths.ifName)) }
+            Files.writeString(stopFile, "")
+            assertTrue(process.waitFor(10, TimeUnit.SECONDS))
+            assertTrue(Files.readAllLines(routeLog).none { "delete" in it }, Files.readString(routeLog))
         } finally {
             dir.toFile().deleteRecursively()
         }
