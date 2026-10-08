@@ -1721,7 +1721,7 @@ private fun SubscriptionShareItem.listScheduleDescription(): String {
     } else {
         updateIntervalMs?.friendlySchedule() ?: "Своё расписание"
     }
-    val refreshed = lastRefreshAtEpochMs?.relativeTime()?.let { "Обновлено $it" } ?: "Not updated yet"
+    val refreshed = lastRefreshAtEpochMs?.relativeTime()?.let { "Обновлено $it" } ?: "Ещё не обновлялась"
     return "$schedule · $refreshed"
 }
 

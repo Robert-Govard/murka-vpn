@@ -22,8 +22,8 @@ fun IosSocksOnboardingDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "On iOS, Olcbox provides a local SOCKS5 proxy. Add these settings " +
-                        "to a SOCKS5-capable client such as Karing or Shadowrocket, then start Olcbox."
+                    "На iPhone приложение работает как локальный SOCKS5-прокси. Укажите эти настройки " +
+                        "в клиенте с поддержкой SOCKS5 (например, Karing или Shadowrocket) и запустите Мурка VPN."
                 )
                 SelectionContainer {
                     Text(
