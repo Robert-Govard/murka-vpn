@@ -11,6 +11,9 @@ permissions:
 
 env:
   ANDROID_NDK_VERSION: "28.2.13676358"
+  # Public download/update repo; needs the RELEASES_TOKEN secret (fine-grained,
+  # Contents: read and write on that repo only). Without it, publishing there is skipped.
+  PUBLIC_REPO: Robert-Govard/murka-vpn-releases
 
 jobs:
   version:
@@ -44,6 +47,21 @@ jobs:
               --title "Мурка VPN nightly ${VERSION}" --notes "Build ${GITHUB_RUN_NUMBER} from ${GITHUB_SHA}"
           else
             gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "Мурка VPN ${TAG}" --notes "Build ${GITHUB_RUN_NUMBER}"
+          fi
+      - name: Prepare public release
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          if [ -z "$RELEASES_TOKEN" ]; then echo "RELEASES_TOKEN not set, skipping $PUBLIC_REPO"; exit 0; fi
+          export GH_TOKEN="$RELEASES_TOKEN"
+          if [ "$TAG" = nightly ]; then
+            gh release delete nightly -R "$PUBLIC_REPO" --cleanup-tag -y || true
+            gh release create nightly -R "$PUBLIC_REPO" --prerelease \
+              --title "Мурка VPN nightly ${VERSION}" --notes "Тестовая сборка ${VERSION}"
+          else
+            gh release create "$TAG" -R "$PUBLIC_REPO" --latest --title "Мурка VPN ${VERSION}" --notes "Мурка VPN ${VERSION}"
           fi
 
   android:
@@ -100,6 +118,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
         run: gh release upload "$TAG" olcbox/dist/* --clobber -R "$GITHUB_REPOSITORY"
+      - name: Publish to public repo
+        shell: bash
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          if [ -z "$RELEASES_TOKEN" ]; then echo "RELEASES_TOKEN not set, skipping $PUBLIC_REPO"; exit 0; fi
+          GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" olcbox/dist/* --clobber -R "$PUBLIC_REPO"
 
   windows:
     needs: version
@@ -142,6 +168,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
         run: gh release upload "$TAG" olcbox/dist/* --clobber -R "$GITHUB_REPOSITORY"
+      - name: Publish to public repo
+        shell: bash
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          if [ -z "$RELEASES_TOKEN" ]; then echo "RELEASES_TOKEN not set, skipping $PUBLIC_REPO"; exit 0; fi
+          GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" olcbox/dist/* --clobber -R "$PUBLIC_REPO"
 
   macos:
     needs: version
@@ -173,3 +207,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
         run: gh release upload "$TAG" olcbox/dist/* --clobber -R "$GITHUB_REPOSITORY"
+      - name: Publish to public repo
+        shell: bash
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          if [ -z "$RELEASES_TOKEN" ]; then echo "RELEASES_TOKEN not set, skipping $PUBLIC_REPO"; exit 0; fi
+          GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" olcbox/dist/* --clobber -R "$PUBLIC_REPO"
