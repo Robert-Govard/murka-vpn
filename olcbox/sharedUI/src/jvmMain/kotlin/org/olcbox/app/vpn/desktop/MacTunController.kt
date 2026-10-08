@@ -94,8 +94,13 @@ internal class MacTunController(
         val process = ProcessBuilder(
             "/usr/bin/osascript", "-e", adminAppleScript(shellCommand, PASSWORD_PROMPT)
         ).redirectErrorStream(true).start()
+        // Covers the time to type the password; never leave the app spinning forever.
+        if (!process.waitFor(ADMIN_PROMPT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            process.destroyForcibly()
+            error("Не дождались ввода пароля администратора — VPN не включён")
+        }
         val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-        if (process.waitFor() != 0) {
+        if (process.exitValue() != 0) {
             if ("-128" in output) error("Пароль администратора не введён — VPN не включён")
             error("Не удалось включить VPN: $output")
         }
@@ -159,6 +164,7 @@ internal class MacTunController(
         const val LOG_PATH = "/var/log/murka-tun.log"
         const val DIR_PLACEHOLDER = "@MURKA_TUN_DIR@"
         const val PASSWORD_PROMPT = "Мурка VPN включает VPN для всех приложений."
+        private const val ADMIN_PROMPT_TIMEOUT_MS = 120_000L
         private const val READY_TIMEOUT_MS = 20_000L
         private const val STOP_TIMEOUT_MS = 5_000L
         private const val POLL_MS = 200L
@@ -247,12 +253,16 @@ internal class MacTunController(
             if [ "${'$'}(cat ${paths.pid} 2>/dev/null)" = "${'$'}hev_pid" ]; then rm -f ${paths.ifName} ${paths.pid}; fi
         """.trimIndent() + "\n"
 
-        /** Shell command run with admin rights: copy the helper out of reach of the user and detach it. */
+        /**
+         * Shell command run with admin rights: copy the helper out of reach of the user and
+         * detach it. osascript returns only once no process holds its stdin/stdout/stderr;
+         * the braces keep `&` on the helper alone, not on the whole `&&` chain.
+         */
         fun launchCommand(helper: Path, hevBinary: Path, config: Path, appPid: Long, stopFile: Path): String {
             val args = listOf(hevBinary, config).joinToString(" ") { shellQuote(it.toString()) } +
                 " $appPid " + shellQuote(stopFile.toString())
             return "d=\$(mktemp -d /tmp/murka-helper.XXXXXX) && cp ${shellQuote(helper.toString())} \"\$d/h.sh\" && " +
-                "chmod 700 \"\$d/h.sh\" && (/bin/sh \"\$d/h.sh\" $args; rm -rf \"\$d\") > /dev/null 2>&1 &"
+                "chmod 700 \"\$d/h.sh\" && { (/bin/sh \"\$d/h.sh\" $args; rm -rf \"\$d\") < /dev/null > /dev/null 2>&1 & }"
         }
 
         fun adminAppleScript(shellCommand: String, prompt: String): String =
