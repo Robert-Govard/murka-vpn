@@ -112,6 +112,9 @@ type Status struct {
 type Net struct {
 	Transport string `yaml:"transport"` // datachannel, videochannel, seichannel, vp8channel
 	DNS       string `yaml:"dns"`
+	// BindInterface pins all sockets to this interface (macOS only), so a
+	// desktop TUN that owns the default route does not loop olcRTC's own traffic.
+	BindInterface string `yaml:"bind_interface"`
 }
 
 // SOCKS bundles SOCKS5 listener and outbound-proxy settings.

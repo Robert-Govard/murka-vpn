@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openlibrecommunity/olcrtc/internal/app/session"
@@ -353,5 +354,23 @@ func TestWaitForShutdown(t *testing.T) {
 	errCh <- want
 	if err := waitForShutdown(errCh); !errors.Is(err, want) {
 		t.Fatalf("waitForShutdown(error) = %v, want %v", err, want)
+	}
+}
+
+func TestLoadConfigReadsBindInterface(t *testing.T) {
+	path := writeYAML(t, "mode: cnc\nnet:\n  transport: vp8channel\n  dns: 8.8.8.8:53\n  bind_interface: en-test\n")
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.bindInterface != "en-test" {
+		t.Fatalf("bindInterface = %q, want en-test", cfg.bindInterface)
+	}
+}
+
+func TestRunWithConfigFailsOnUnknownBindInterface(t *testing.T) {
+	err := runWithConfig(loadedConfig{bindInterface: "no-such-if0"})
+	if err == nil || !strings.Contains(err.Error(), "bind") {
+		t.Fatalf("runWithConfig error = %v, want bind interface error", err)
 	}
 }

@@ -25,6 +25,7 @@ import (
 	configpkg "github.com/openlibrecommunity/olcrtc/internal/config"
 	"github.com/openlibrecommunity/olcrtc/internal/logger"
 	"github.com/openlibrecommunity/olcrtc/internal/names"
+	"github.com/openlibrecommunity/olcrtc/internal/protect"
 	"github.com/openlibrecommunity/olcrtc/internal/supervisor"
 )
 
@@ -50,6 +51,8 @@ type loadedConfig struct {
 	failover failoverConfig
 	dataDir  string
 	debug    bool
+	// bindInterface is process-wide, so it lives outside session.Config.
+	bindInterface string
 }
 
 type failoverConfig struct {
@@ -126,6 +129,8 @@ func loadConfig(path string) (loadedConfig, error) {
 		failover: failover,
 		dataDir:  resolveDataDir(path, file.Data),
 		debug:    file.Debug,
+
+		bindInterface: file.Net.BindInterface,
 	}, nil
 }
 
@@ -146,6 +151,12 @@ func parseFailoverConfig(f configpkg.Failover) (failoverConfig, error) {
 
 func runWithConfig(cfg loadedConfig) error {
 	configureLogging(cfg.debug)
+
+	if cfg.bindInterface != "" {
+		if err := protect.BindToInterface(cfg.bindInterface); err != nil {
+			return fmt.Errorf("net.bind_interface: %w", err)
+		}
+	}
 
 	scfg := session.ApplyDefaults(cfg.scfg)
 
