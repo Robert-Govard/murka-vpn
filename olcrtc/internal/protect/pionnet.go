@@ -35,7 +35,7 @@ var ErrUnexpectedConnType = errors.New("protect: unexpected connection type")
 // gathering. Keep pptp explicit; it does not match the ppp prefix.
 //
 //nolint:gochecknoglobals // fixed lookup table; a slice cannot be const
-var tunInterfacePrefixes = []string{"tun", "ppp", "pptp"}
+var tunInterfacePrefixes = []string{"tun", "utun", "ppp", "pptp"}
 
 const (
 	ipNetwork4           = "ip4"
