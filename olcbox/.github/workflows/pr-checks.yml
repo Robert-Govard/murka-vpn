@@ -1,0 +1,91 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Gradle checks
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_NDK_VERSION: "28.2.13676358"
+
+    steps:
+      - name: Checkout olcbox
+        uses: actions/checkout@v7
+        with:
+          path: olcbox
+
+      - name: Test native DNS restart handling
+        working-directory: olcbox
+        run: make -C tests/native test SANITIZERS=address,undefined
+
+      - name: Read reviewed olcrtc revision
+        id: core
+        shell: bash
+        run: echo "sha=$(cat olcbox/.github/olcrtc-revision)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout olcrtc
+        uses: actions/checkout@v7
+        with:
+          repository: alananisimov/olcrtc
+          ref: ${{ steps.core.outputs.sha }}
+          path: olcrtc
+          submodules: recursive
+
+      - name: Setup JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.3'
+          cache-dependency-path: olcrtc/go.sum
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install Go mobile tooling
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install github.com/magefile/mage@latest
+
+      - name: Initialize gomobile
+        working-directory: olcrtc
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}"
+          export ANDROID_NDK_ROOT="${ANDROID_NDK_HOME}"
+          gomobile init
+
+      - name: Test olcrtc
+        working-directory: olcrtc
+        run: go test -count=1 -race -timeout 15m ./...
+
+      - name: Run checks
+        working-directory: olcbox
+        run: |
+          export OLCRTC_REPO="${{ github.workspace }}/olcrtc"
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}"
+          export ANDROID_NDK_ROOT="${ANDROID_NDK_HOME}"
+          ./gradlew :sharedUI:jvmTest :desktopApp:compileKotlin :androidApp:assembleDebug --stacktrace
