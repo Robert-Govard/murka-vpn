@@ -23,13 +23,16 @@ class MacTunControllerTest {
     """.trimIndent()
 
     @Test
-    fun physicalInterfaceSkipsOtherVpnClients() {
-        assertEquals("en0", MacTunController.physicalInterface(netstatBehindVpnClient))
+    fun physicalRouteSkipsOtherVpnClients() {
+        assertEquals(
+            MacTunController.PhysicalRoute("en0", "192.168.50.1"),
+            MacTunController.physicalRoute(netstatBehindVpnClient)
+        )
     }
 
     @Test
-    fun physicalInterfaceIsNullWithoutGatewayRoute() {
-        assertNull(MacTunController.physicalInterface("default            link#23            UCSg                utun7"))
+    fun physicalRouteIsNullWithoutGatewayRoute() {
+        assertNull(MacTunController.physicalRoute("default            link#23            UCSg                utun7"))
     }
 
     @Test
@@ -68,10 +71,11 @@ class MacTunControllerTest {
             hevBinary = Path.of("/Users/a b/hev"),
             config = Path.of("/Users/a b/hev.yml"),
             appPid = 42,
-            stopFile = Path.of("/Users/a b/stop")
+            stopFile = Path.of("/Users/a b/stop"),
+            physical = MacTunController.PhysicalRoute("en0", "192.168.50.1")
         )
         assertTrue("cp '/Users/a b/helper.sh'" in cmd)
-        assertTrue("'/Users/a b/hev' '/Users/a b/hev.yml' 42 '/Users/a b/stop'" in cmd)
+        assertTrue("'/Users/a b/hev' '/Users/a b/hev.yml' 42 '/Users/a b/stop' 'en0' '192.168.50.1'" in cmd)
         assertTrue(cmd.endsWith("& }"))
     }
 
@@ -91,7 +95,8 @@ class MacTunControllerTest {
                 hevBinary = dir.resolve("hev"),
                 config = dir.resolve("hev.yml"),
                 appPid = ProcessHandle.current().pid(),
-                stopFile = dir.resolve("stop")
+                stopFile = dir.resolve("stop"),
+                physical = MacTunController.PhysicalRoute("en0", "192.168.50.1")
             )
             // Same AppleScript as production, minus the admin prompt.
             val script = MacTunController.adminAppleScript(command, "test")
@@ -107,6 +112,27 @@ class MacTunControllerTest {
         }
     }
 
+    @Test
+    fun helperRejectsMalformedPhysicalRoute() {
+        if (!System.getProperty("os.name").startsWith("Mac")) return
+        val dir = Files.createTempDirectory("murka-tun-bad")
+        try {
+            val paths = MacTunController.HelperPaths(
+                pid = dir.resolve("pid").toString(), ifName = dir.resolve("ifname").toString(),
+                log = dir.resolve("hev.log").toString(), route = "/usr/bin/false", tmpDir = dir.toString()
+            )
+            val helper = executable(dir.resolve("helper.sh"), MacTunController.helperScript(paths))
+            val process = ProcessBuilder(
+                "/bin/sh", helper.toString(), "/bin/sleep", "/dev/null", "1", dir.resolve("stop").toString(),
+                "en0;reboot", "192.168.50.1"
+            ).redirectErrorStream(true).start()
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS))
+            assertTrue(process.exitValue() != 0)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
     /** Runs the real helper unprivileged with a fake hev and a recording `route`. */
     @Test
     fun helperBringsTunnelUpAndTearsItDownOnStopFile() {
@@ -114,7 +140,11 @@ class MacTunControllerTest {
         val dir = Files.createTempDirectory("murka-tun-test")
         try {
             val routeLog = dir.resolve("route.log")
-            val route = executable(dir.resolve("route"), "#!/bin/sh\necho \"$@\" >> '$routeLog'\n")
+            // `route -n get` fails: no scoped default for en0, as when en0 is the primary interface.
+            val route = executable(
+                dir.resolve("route"),
+                "#!/bin/sh\nif [ \"$2\" = get ]; then exit 1; fi\necho \"$@\" >> '$routeLog'\n"
+            )
             // Fake hev: run post-up-script from its config with a utun name, then idle.
             val hev = executable(
                 dir.resolve("hev"),
@@ -133,18 +163,25 @@ class MacTunControllerTest {
             val stopFile = dir.resolve("stop")
             val process = ProcessBuilder(
                 "/bin/sh", helper.toString(), hev.toString(), config.toString(),
-                ProcessHandle.current().pid().toString(), stopFile.toString()
+                ProcessHandle.current().pid().toString(), stopFile.toString(), "en0", "192.168.50.1"
             ).redirectErrorStream(true).start()
 
             waitUntil { Files.exists(Path.of(paths.ifName)) }
             assertEquals("utun99", Files.readString(Path.of(paths.ifName)).trim())
             assertEquals(
-                listOf("-q -n add -inet 0.0.0.0/1 -interface utun99", "-q -n add -inet 128.0.0.0/1 -interface utun99"),
+                listOf(
+                    // Sockets bound to en0 (Xray, olcRTC) need a scoped default, or they get
+                    // "network is unreachable" once the utun holds 0/1 + 128/1.
+                    "-q -n add -ifscope en0 default 192.168.50.1",
+                    "-q -n add -inet 0.0.0.0/1 -interface utun99",
+                    "-q -n add -inet 128.0.0.0/1 -interface utun99"
+                ),
                 Files.readAllLines(routeLog)
             )
 
             Files.writeString(stopFile, "")
             assertTrue(process.waitFor(10, TimeUnit.SECONDS), "helper did not exit on stop file")
+            assertEquals("-q -n delete -ifscope en0 default", Files.readAllLines(routeLog).last())
             assertFalse(Files.exists(Path.of(paths.ifName)))
             assertFalse(Files.exists(Path.of(paths.pid)))
             assertTrue(Files.list(dir).use { s -> s.noneMatch { it.fileName.toString().startsWith("murka-tun.") } })

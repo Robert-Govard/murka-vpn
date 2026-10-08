@@ -211,9 +211,14 @@ class DesktopVpnManager private constructor(
             }
 
             // Cores bind to the physical interface so their own traffic skips the TUN.
+            val macPhysicalRoute = if (desktopMode == DesktopMode.MacTun) {
+                macTunController.detectPhysicalRoute()
+            } else {
+                null
+            }
             val bindInterface = when (desktopMode) {
                 DesktopMode.WindowsTun -> if (location.isXray) windowsTunController.detectPhysicalInterface() else null
-                DesktopMode.MacTun -> macTunController.detectPhysicalInterface()
+                DesktopMode.MacTun -> macPhysicalRoute?.interfaceName
                 else -> null
             }
 
@@ -254,7 +259,12 @@ class DesktopVpnManager private constructor(
             when (desktopMode) {
                 DesktopMode.LinuxTun -> startLinuxTun(socksSettings.port, requestGeneration)
                 DesktopMode.WindowsTun -> startWindowsTun(socksSettings.port, requestGeneration)
-                DesktopMode.MacTun -> startMacTun(socksSettings, location.isXray, requestGeneration)
+                DesktopMode.MacTun -> startMacTun(
+                    socksSettings = socksSettings,
+                    isXray = location.isXray,
+                    physical = macPhysicalRoute ?: error("macOS physical route is missing"),
+                    requestGeneration = requestGeneration
+                )
                 DesktopMode.SystemProxy -> startSystemProxy(socksSettings, requestGeneration)
                 DesktopMode.LocalSocks -> Unit
             }
@@ -320,6 +330,7 @@ class DesktopVpnManager private constructor(
     private suspend fun startMacTun(
         socksSettings: DesktopSocksProxySettings,
         isXray: Boolean,
+        physical: MacTunController.PhysicalRoute,
         requestGeneration: Long
     ) {
         tunProcess = macTunController.start(
@@ -327,7 +338,8 @@ class DesktopVpnManager private constructor(
             socksPort = socksSettings.port,
             socksUsername = socksSettings.username,
             socksPassword = socksSettings.password,
-            udpOverTcp = !isXray
+            udpOverTcp = !isXray,
+            physical = physical
         )
 
         if (requestGeneration != generation) {
