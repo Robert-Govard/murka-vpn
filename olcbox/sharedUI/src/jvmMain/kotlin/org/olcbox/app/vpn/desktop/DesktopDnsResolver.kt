@@ -13,8 +13,13 @@ internal object DesktopDnsResolver {
     fun current(): String {
         return when (DesktopPaths.os) {
             DesktopOs.Linux -> currentLinuxDnsServer() ?: FALLBACK_DNS_SERVER
-            DesktopOs.MacOS,
-            DesktopOs.Windows,
+            // System DNS, not a public resolver: under whitelists or behind another
+            // VPN client direct queries to 1.1.1.1 often get no answer.
+            DesktopOs.MacOS -> runCommand(listOf("/usr/sbin/scutil", "--dns"))
+                ?.let(::selectMacDnsServer) ?: FALLBACK_DNS_SERVER
+            // PowerShell can take several seconds to start cold.
+            DesktopOs.Windows -> runCommand(windowsDnsCommand(), timeoutSeconds = 10)
+                ?.let(::selectWindowsDnsServer) ?: FALLBACK_DNS_SERVER
             DesktopOs.Other -> FALLBACK_DNS_SERVER
         }
     }
@@ -42,12 +47,12 @@ internal object DesktopDnsResolver {
         )
     }
 
-    private fun runCommand(command: List<String>): String? {
+    private fun runCommand(command: List<String>, timeoutSeconds: Long = COMMAND_TIMEOUT_SECONDS): String? {
         return runCatching {
             val process = ProcessBuilder(command)
                 .redirectErrorStream(true)
                 .start()
-            if (!process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 process.destroyForcibly()
                 return@runCatching null
             }
@@ -64,6 +69,32 @@ internal object DesktopDnsResolver {
             }
             .firstOrNull { it != LinuxTunController.TUN_NAME }
     }
+
+    /** First non-loopback `nameserver[n]` of the first resolver in `scutil --dns`. */
+    internal fun selectMacDnsServer(scutilOutput: String): String? {
+        val firstResolver = scutilOutput.substringAfter("resolver #1", missingDelimiterValue = "")
+            .substringBefore("resolver #2")
+        val servers = firstResolver.lineSequence()
+            .mapNotNull { MAC_NAMESERVER.find(it)?.groupValues?.get(1) }
+            .mapNotNull(::ipLiteralOrNull)
+            .toList()
+        val selected = servers.firstOrNull { !isLoopback(it) } ?: return null
+        return dnsEndpoint(selected)
+    }
+
+    /** DNS servers of the default-route interface, one per line (see [windowsDnsCommand]). */
+    internal fun selectWindowsDnsServer(output: String): String? {
+        val selected = ipAddresses(output).firstOrNull { !isLoopback(it) } ?: return null
+        return dnsEndpoint(selected)
+    }
+
+    private fun windowsDnsCommand(): List<String> = listOf(
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+        "\$r = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 | " +
+            "Where-Object { \$_.InterfaceAlias -ne '${WindowsTunController.TUN_NAME}' } | " +
+            "Sort-Object RouteMetric | Select-Object -First 1; " +
+            "(Get-DnsClientServerAddress -InterfaceIndex \$r.InterfaceIndex -AddressFamily IPv4).ServerAddresses"
+    )
 
     internal fun selectLinuxDnsServer(
         resolvectlOutput: String,
@@ -123,5 +154,6 @@ internal object DesktopDnsResolver {
     }
 
     private val DEFAULT_ROUTE_DEVICE = Regex("(?:^|\\s)dev\\s+(\\S+)")
+    private val MAC_NAMESERVER = Regex("nameserver\\[\\d+\\]\\s*:\\s*(\\S+)")
     private const val COMMAND_TIMEOUT_SECONDS = 2L
 }
