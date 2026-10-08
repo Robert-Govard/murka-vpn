@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   ANDROID_NDK_VERSION: "28.2.13676358"
@@ -18,16 +18,33 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       code: ${{ steps.v.outputs.code }}
+      tag: ${{ steps.v.outputs.tag }}
     steps:
       - id: v
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            version="${GITHUB_REF#refs/tags/v}"
+            version="${GITHUB_REF#refs/tags/v}"; tag="${GITHUB_REF_NAME}"
           else
-            version="1.0.${GITHUB_RUN_NUMBER}"
+            version="1.0.${GITHUB_RUN_NUMBER}"; tag="nightly"
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      # Files go to a GitHub release, not workflow artifacts: the account's
+      # artifact storage quota is too small for APKs and installers.
+      - name: Prepare release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          if [ "$TAG" = nightly ]; then
+            gh release delete nightly -R "$GITHUB_REPOSITORY" --cleanup-tag -y || true
+            gh release create nightly -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+              --title "Мурка VPN nightly ${VERSION}" --notes "Build ${GITHUB_RUN_NUMBER} from ${GITHUB_SHA}"
+          else
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "Мурка VPN ${TAG}" --notes "Build ${GITHUB_RUN_NUMBER}"
+          fi
 
   android:
     needs: version
@@ -45,7 +62,7 @@ jobs:
           cache-dependency-path: |
             murka-core/go.sum
             olcrtc/go.sum
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
       - name: Android SDK packages
         run: sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;${ANDROID_NDK_VERSION}"
       - uses: gradle/actions/setup-gradle@v4
@@ -77,10 +94,12 @@ jobs:
           cp "$(find androidApp/build/outputs/apk/release -name '*.apk' | head -n1)" "dist/MurkaVPN-${VERSION}-android-universal.apk"
           ./gradlew $props -Polcbox.android.abiFilters=arm64-v8a :androidApp:clean :androidApp:assembleRelease --stacktrace
           cp "$(find androidApp/build/outputs/apk/release -name '*.apk' | head -n1)" "dist/MurkaVPN-${VERSION}-android-arm64-v8a.apk"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: android
-          path: olcbox/dist/*.apk
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release upload "$TAG" olcbox/dist/* --clobber -R "$GITHUB_REPOSITORY"
 
   windows:
     needs: version
@@ -113,10 +132,16 @@ jobs:
           Get-ChildItem -Recurse desktopApp/build -Filter "*-windows-amd64-portable.zip" |
             ForEach-Object { Copy-Item $_.FullName "dist/MurkaVPN-$env:VERSION-windows-amd64-portable.zip" }
           Get-ChildItem dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: olcbox/dist/*
+      - name: jpackage logs
+        if: failure()
+        shell: pwsh
+        run: Get-ChildItem -Recurse olcbox/desktopApp/build/compose/logs -Filter *.txt | ForEach-Object { "== $($_.FullName)"; Get-Content $_.FullName -Tail 60 }
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release upload "$TAG" olcbox/dist/* --clobber -R "$GITHUB_REPOSITORY"
 
   macos:
     needs: version
@@ -142,20 +167,9 @@ jobs:
           ./gradlew -Polcbox.version="${VERSION}" :desktopApp:packageReleaseDmg --stacktrace
           mkdir -p dist
           cp "$(find desktopApp/build/compose/binaries/main-release/dmg -name '*.dmg' | head -n1)" "dist/MurkaVPN-${VERSION}-macos-arm64.dmg"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos
-          path: olcbox/dist/*.dmg
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [version, android, windows, macos]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { path: dist, merge-multiple: true }
-      - env:
+      - name: Publish
+        shell: bash
+        env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --title "Мурка VPN ${GITHUB_REF_NAME}" --notes "Build ${GITHUB_RUN_NUMBER}"
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release upload "$TAG" olcbox/dist/* --clobber -R "$GITHUB_REPOSITORY"
