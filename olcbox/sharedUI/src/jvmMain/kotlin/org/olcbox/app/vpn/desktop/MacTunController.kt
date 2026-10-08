@@ -27,7 +27,8 @@ internal class MacTunController(
         socksPort: Int,
         socksUsername: String,
         socksPassword: String,
-        udpOverTcp: Boolean
+        udpOverTcp: Boolean,
+        physical: PhysicalRoute
     ): Process {
         val dir = DesktopPaths.appDataDir().resolve("mac-tun")
         Files.createDirectories(dir)
@@ -45,7 +46,8 @@ internal class MacTunController(
                 hevBinary = hevBinary,
                 config = config,
                 appPid = ProcessHandle.current().pid(),
-                stopFile = stopFile
+                stopFile = stopFile,
+                physical = physical
             )
         )
 
@@ -82,12 +84,12 @@ internal class MacTunController(
     }
 
     /**
-     * Interface that carries the IPv4 default route outside any tunnel. Read it before
+     * Interface and gateway of the IPv4 default route outside any tunnel. Read it before
      * our routes exist; another VPN client may own the first default route.
      */
-    suspend fun detectPhysicalInterface(): String = withContext(Dispatchers.IO) {
+    suspend fun detectPhysicalRoute(): PhysicalRoute = withContext(Dispatchers.IO) {
         val output = runCommand(listOf("/usr/sbin/netstat", "-rn", "-f", "inet"))
-        physicalInterface(output) ?: error("No physical IPv4 default route found")
+        physicalRoute(output) ?: error("No physical IPv4 default route found")
     }
 
     private suspend fun runAdminCommand(shellCommand: String) = withContext(Dispatchers.IO) {
@@ -155,6 +157,8 @@ internal class MacTunController(
         val tmpDir: String = "/tmp"
     )
 
+    internal data class PhysicalRoute(val interfaceName: String, val gateway: String)
+
     internal companion object {
         const val TUN_MTU = 1500
         const val TUN_IPV4_ADDRESS = "10.0.88.88"
@@ -173,12 +177,12 @@ internal class MacTunController(
         private val TUNNEL_PREFIXES = listOf("utun", "ipsec", "ppp", "gif", "stf", "tun", "tap")
 
         /** First `default` route in `netstat -rn -f inet` that has a gateway and is not a tunnel. */
-        fun physicalInterface(netstatOutput: String): String? = netstatOutput.lineSequence()
+        fun physicalRoute(netstatOutput: String): PhysicalRoute? = netstatOutput.lineSequence()
             .map { it.trim().split(Regex("\\s+")) }
             .filter { it.size >= 4 && it[0] == "default" }
             .filter { cols -> cols[1].matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+")) }
-            .map { cols -> cols[3] }
-            .firstOrNull { netif -> TUNNEL_PREFIXES.none { netif.startsWith(it) } }
+            .map { cols -> PhysicalRoute(cols[3], cols[1]) }
+            .firstOrNull { route -> TUNNEL_PREFIXES.none { route.interfaceName.startsWith(it) } }
 
         fun hasTunnelRoutes(netstatOutput: String, ifName: String): Boolean {
             val routes = netstatOutput.lineSequence()
@@ -222,10 +226,12 @@ internal class MacTunController(
             appendLine("  log-level: warn")
         }.trimEnd()
 
-        /** Runs as root. Args: hev binary, hev config, app pid, stop file. */
+        /** Runs as root. Args: hev binary, hev config, app pid, stop file, physical interface, its gateway. */
         fun helperScript(paths: HelperPaths = HelperPaths()): String = """
             #!/bin/sh
-            hev_src="${'$'}1"; conf_src="${'$'}2"; app_pid="${'$'}3"; stop_file="${'$'}4"
+            hev_src="${'$'}1"; conf_src="${'$'}2"; app_pid="${'$'}3"; stop_file="${'$'}4"; phys_if="${'$'}5"; phys_gw="${'$'}6"
+            echo "${'$'}phys_if" | grep -Eq '^[a-z]+[0-9]+${'$'}' || exit 2
+            echo "${'$'}phys_gw" | grep -Eq '^[0-9]{1,3}([.][0-9]{1,3}){3}${'$'}' || exit 2
             # A previous tunnel (reconnect, crashed app): stop its hev and let its helper clean up.
             if [ -f ${paths.pid} ]; then kill "${'$'}(cat ${paths.pid})" 2>/dev/null; sleep 2; fi
             rm -f ${paths.ifName}
@@ -239,6 +245,13 @@ internal class MacTunController(
             echo "${'$'}1" > ${paths.ifName}
             UP
             chmod 700 "${'$'}dir/hev" "${'$'}dir/up.sh"
+            # Xray and olcRTC pin their sockets to the physical interface (IP_BOUND_IF). macOS
+            # keeps a scoped default only for non-primary interfaces, so without this they get
+            # "network is unreachable" once the utun holds 0/1 + 128/1.
+            added_scope=0
+            if ! ${paths.route} -n get -ifscope "${'$'}phys_if" default > /dev/null 2>&1; then
+              ${paths.route} -q -n add -ifscope "${'$'}phys_if" default "${'$'}phys_gw" && added_scope=1
+            fi
             "${'$'}dir/hev" "${'$'}dir/hev.yml" > ${paths.log} 2>&1 &
             hev_pid=${'$'}!
             echo "${'$'}hev_pid" > ${paths.pid}
@@ -249,6 +262,7 @@ internal class MacTunController(
             kill "${'$'}hev_pid" 2>/dev/null
             for _ in 1 2 3; do kill -0 "${'$'}hev_pid" 2>/dev/null || break; sleep 1; done
             kill -9 "${'$'}hev_pid" 2>/dev/null
+            if [ "${'$'}added_scope" = 1 ]; then ${paths.route} -q -n delete -ifscope "${'$'}phys_if" default; fi
             rm -rf "${'$'}dir"
             if [ "${'$'}(cat ${paths.pid} 2>/dev/null)" = "${'$'}hev_pid" ]; then rm -f ${paths.ifName} ${paths.pid}; fi
         """.trimIndent() + "\n"
@@ -258,9 +272,17 @@ internal class MacTunController(
          * detach it. osascript returns only once no process holds its stdin/stdout/stderr;
          * the braces keep `&` on the helper alone, not on the whole `&&` chain.
          */
-        fun launchCommand(helper: Path, hevBinary: Path, config: Path, appPid: Long, stopFile: Path): String {
+        fun launchCommand(
+            helper: Path,
+            hevBinary: Path,
+            config: Path,
+            appPid: Long,
+            stopFile: Path,
+            physical: PhysicalRoute
+        ): String {
             val args = listOf(hevBinary, config).joinToString(" ") { shellQuote(it.toString()) } +
-                " $appPid " + shellQuote(stopFile.toString())
+                " $appPid " + listOf(stopFile.toString(), physical.interfaceName, physical.gateway)
+                    .joinToString(" ") { shellQuote(it) }
             return "d=\$(mktemp -d /tmp/murka-helper.XXXXXX) && cp ${shellQuote(helper.toString())} \"\$d/h.sh\" && " +
                 "chmod 700 \"\$d/h.sh\" && { (/bin/sh \"\$d/h.sh\" $args; rm -rf \"\$d\") < /dev/null > /dev/null 2>&1 & }"
         }
