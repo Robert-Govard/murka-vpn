@@ -163,7 +163,7 @@ fun AndroidMainScreen(
     fun showUpdateResult(info: AppUpdateInfo) {
         if (info.isUpdateAvailable) {
             updateOffer = info
-            updateStatusText = "${info.channel.name} update available: ${info.version}"
+            updateStatusText = "Доступно обновление: ${info.version}"
         } else {
             updateOffer = null
             updateStatusText = "Мурка VPN is up to date"
@@ -173,7 +173,7 @@ fun AndroidMainScreen(
     fun checkUpdate(manual: Boolean) {
         val service = appUpdateService
         if (service == null) {
-            updateStatusText = "Update service unavailable"
+            updateStatusText = "Проверка обновлений недоступна"
             return
         }
         scope.launch {
@@ -181,7 +181,7 @@ fun AndroidMainScreen(
             val checkStartedAt = kotlin.time.Clock.System.now().toEpochMilliseconds()
             if (!manual && !previousSettings.isUpdateCheckDue(checkStartedAt)) return@launch
 
-            updateStatusText = "Checking ${previousSettings.channel.name.lowercase()}..."
+            updateStatusText = "Проверка обновлений..."
             val result = service.check(
                 previousSettings.channel,
                 vpnManager.subscriptionFetchProxy()
@@ -199,7 +199,7 @@ fun AndroidMainScreen(
                     }
                 },
                 onFailure = { error ->
-                    updateStatusText = error.message ?: "Update check failed"
+                    updateStatusText = error.message ?: "Не удалось проверить обновления"
                 }
             )
         }
@@ -216,17 +216,17 @@ fun AndroidMainScreen(
             }
 
             updateDownloadProgress = 0f
-            updateStatusText = "Downloading ${info.asset.name}..."
+            updateStatusText = "Скачивание ${info.asset.name}..."
             val result = updateInstaller.download(info.asset) { progress ->
                 updateDownloadProgress = progress
             }
             val file = result.getOrElse { error ->
-                updateStatusText = "Download failed: ${error.message ?: "unknown error"}"
+                updateStatusText = "Не удалось скачать: ${error.message ?: "неизвестная ошибка"}"
                 updateDownloadProgress = null
                 Toast.makeText(context, updateStatusText, Toast.LENGTH_LONG).show()
                 return@launch
             }
-            updateStatusText = "Installing ${info.asset.name}"
+            updateStatusText = "Установка ${info.asset.name}"
             saveUpdateSettings(
                 updateSettings.copy(
                     lastSeenUpdateVersion = info.identity(),
@@ -240,7 +240,7 @@ fun AndroidMainScreen(
                 .onFailure {
                     relaunchAfterInstall = false
                     updateOffer = info
-                    updateStatusText = "Could not open installer: ${it.message}"
+                    updateStatusText = "Не удалось открыть установщик: ${it.message}"
                 }
         }
     }
@@ -310,7 +310,7 @@ fun AndroidMainScreen(
             rawText = rawText,
             onComplete = {
                 reloadLocationsAfterImport {
-                    Toast.makeText(context, "QR imported", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "QR-код импортирован", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -375,7 +375,7 @@ fun AndroidMainScreen(
             viewModel.onCopyFullConfigClicked()
         },
         onShareLocationRequested = { config ->
-            shareSheetPayload = "Location QR" to ConfigShareService.olcRtcUri(config)
+            shareSheetPayload = "QR-код сервера" to ConfigShareService.olcRtcUri(config)
         },
         onSaveLogsRequested = { onSaved, onError ->
             pendingLogSaveCallbacks.value = onSaved to onError
@@ -415,7 +415,7 @@ fun AndroidMainScreen(
             downloadProgress = updateDownloadProgress,
             onLater = { postponeUpdate(info) },
             onDownload = { downloadUpdate(info) },
-            downloadLabel = if (updateInstaller.downloadedFile(info.asset) != null) "Install" else "Download"
+            downloadLabel = if (updateInstaller.downloadedFile(info.asset) != null) "Установить" else "Скачать"
         )
     }
 
@@ -440,7 +440,7 @@ fun AndroidMainScreen(
             },
             onCopyConfigClick = {
                 viewModel.onCopyFullConfigClicked()
-                Toast.makeText(context, "Config copied", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Конфигурация скопирована", Toast.LENGTH_SHORT).show()
             },
             onSaveLogsClick = {
                 val showToast: (String) -> Unit = { message ->
@@ -464,7 +464,7 @@ fun AndroidMainScreen(
                 checkUpdate(manual = true)
             },
             onSubscriptionShareClick = { url ->
-                shareSheetPayload = "Subscription QR" to ConfigShareService.subscriptionQrText(url)
+                shareSheetPayload = "QR-код подписки" to ConfigShareService.subscriptionQrText(url)
             },
             onSubscriptionRefreshClick = { url, onFinished ->
                 viewModel.refreshSubscription(url) { updatedCount ->
@@ -472,7 +472,7 @@ fun AndroidMainScreen(
                         viewModel.restartVpnIfRunning()
                         Toast.makeText(
                             context,
-                            if (updatedCount > 0) "Subscription updated" else "Subscription not updated",
+                            if (updatedCount > 0) "Подписка обновлена" else "Подписка не обновлена",
                             Toast.LENGTH_SHORT
                         ).show()
                         onFinished()
@@ -485,9 +485,9 @@ fun AndroidMainScreen(
                         Toast.makeText(
                             context,
                             if (intervalMs == null) {
-                                "Subscription refresh set to Auto"
+                                "Обновление подписки: автоматически"
                             } else {
-                                "Subscription refresh rate saved"
+                                "Период обновления сохранён"
                             },
                             Toast.LENGTH_SHORT
                         ).show()
@@ -500,7 +500,7 @@ fun AndroidMainScreen(
                         viewModel.restartVpnIfRunning()
                         Toast.makeText(
                             context,
-                            "Subscription deleted · $removedLocations locations removed",
+                            "Подписка удалена · серверов удалено: $removedLocations",
                             Toast.LENGTH_SHORT
                         ).show()
                     }

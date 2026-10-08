@@ -37,7 +37,7 @@ fun TrafficQuotaIndicator(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "${quota.availableLabel} remaining",
+                text = "осталось ${quota.availableLabel}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = if (compact) 11.sp else 12.sp,
                 maxLines = 1,
@@ -45,7 +45,7 @@ fun TrafficQuotaIndicator(
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = "${quota.usedLabel} used",
+                text = "использовано ${quota.usedLabel}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = if (compact) 11.sp else 12.sp,
                 maxLines = 1,

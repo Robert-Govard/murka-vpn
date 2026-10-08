@@ -163,7 +163,7 @@ fun LocationRow(
 
             isError -> {
                 Text(
-                    text = "Offline",
+                    text = "Недоступен",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.error
@@ -180,7 +180,7 @@ fun LocationRow(
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Settings",
+                    contentDescription = "Настройки",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -211,9 +211,9 @@ private fun locationSubtitle(location: LocationItem): String {
 
 private fun quotaText(used: String?, available: String?): String? {
     return when {
-        !used.isNullOrBlank() && !available.isNullOrBlank() -> "$used used · $available available"
-        !used.isNullOrBlank() -> "$used used"
-        !available.isNullOrBlank() -> "$available available"
+        !used.isNullOrBlank() && !available.isNullOrBlank() -> "использовано $used · доступно $available"
+        !used.isNullOrBlank() -> "использовано $used"
+        !available.isNullOrBlank() -> "доступно $available"
         else -> null
     }
 }
@@ -223,7 +223,7 @@ private fun LocationSelectionIndicator(isSelected: Boolean) {
     if (isSelected) {
         Icon(
             imageVector = Icons.Rounded.CheckCircle,
-            contentDescription = "Selected location",
+            contentDescription = "Выбранный сервер",
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(24.dp)
         )

@@ -41,7 +41,7 @@ class HomeScreenViewModel(
             configData = LocationConfig(),
             shouldShowConfigInvalidReminder = false,
             canStartVpn = false,
-            startBlockedReason = "Add a location first"
+            startBlockedReason = "Сначала добавьте сервер"
         )
     )
     private val subscriptionRefreshWake = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -92,7 +92,7 @@ class HomeScreenViewModel(
                     selectedLocation = null,
                     configData = LocationConfig(),
                     canStartVpn = false,
-                    startBlockedReason = "Add a location first"
+                    startBlockedReason = "Сначала добавьте сервер"
                 )
             }
             return
@@ -112,7 +112,7 @@ class HomeScreenViewModel(
                 configData = normalized,
                 selectedLocation = locationItem,
                 canStartVpn = normalized.isComplete(),
-                startBlockedReason = if (normalized.isComplete()) null else "Complete active location first"
+                startBlockedReason = if (normalized.isComplete()) null else "Заполните выбранный сервер"
             )
         }
     }
@@ -158,7 +158,7 @@ class HomeScreenViewModel(
                             it.copy(
                                 isVpnLoading = false,
                                 canStartVpn = false,
-                                startBlockedReason = "Add a valid location first"
+                                startBlockedReason = "Сначала добавьте рабочий сервер"
                             )
                         }
                         return@launch
@@ -186,7 +186,7 @@ class HomeScreenViewModel(
                             isVpnConnected = false,
                             isVpnLoading = false,
                             canStartVpn = false,
-                            startBlockedReason = "Add a valid location first"
+                            startBlockedReason = "Сначала добавьте рабочий сервер"
                         )
                     }
                 } else {
@@ -220,15 +220,15 @@ class HomeScreenViewModel(
             logExporter.writeLogs(target, content)
                 .onSuccess { savedPath ->
                     onSaved(
-                        if (savedPath.isBlank() || savedPath == "Logs saved") {
-                            "Logs saved"
+                        if (savedPath.isBlank() || savedPath == "Журнал сохранён") {
+                            "Журнал сохранён"
                         } else {
-                            "Logs saved to $savedPath"
+                            "Журнал сохранён: $savedPath"
                         }
                     )
                 }
                 .onFailure { error ->
-                    onError(error.message ?: "Failed to save logs")
+                    onError(error.message ?: "Не удалось сохранить журнал")
                 }
         }
     }
@@ -241,7 +241,7 @@ class HomeScreenViewModel(
             val content = buildLogsExport(logs.value)
             logExporter.shareLogs(content)
                 .onSuccess { message -> onShared(message) }
-                .onFailure { error -> onError(error.message ?: "Failed to share logs") }
+                .onFailure { error -> onError(error.message ?: "Не удалось отправить журнал") }
         }
     }
 
@@ -255,7 +255,7 @@ class HomeScreenViewModel(
                 onComplete = onComplete,
                 onError = onError
             )
-        } ?: onError("No clipboard data found")
+        } ?: onError("Буфер обмена пуст")
     }
 
     fun readImportTextFromClipboard(
@@ -265,7 +265,7 @@ class HomeScreenViewModel(
         configImporter.getFromClipboard()
             ?.takeIf { it.isNotBlank() }
             ?.let(onText)
-            ?: onError("No clipboard data found")
+            ?: onError("Буфер обмена пуст")
     }
 
     fun onFileSelected(
@@ -276,7 +276,7 @@ class HomeScreenViewModel(
         viewModelScope.launch {
             val text = configImporter.readTextFromSource(fileSource)
             if (text == null) {
-                onError("Could not read config file")
+                onError("Не удалось прочитать файл")
             } else {
                 onImportFullConfig(
                     rawText = text,
@@ -295,7 +295,7 @@ class HomeScreenViewModel(
         onError: (String) -> Unit = {}
     ) {
         if (rawText.isBlank()) {
-            onError("No config text found")
+            onError("В файле нет конфигурации")
             return
         }
         viewModelScope.launch {
@@ -323,7 +323,7 @@ class HomeScreenViewModel(
                     }
                 }
             } catch (e: Exception) {
-                val message = e.message ?: "Import failed"
+                val message = e.message ?: "Не удалось добавить"
                 onError(message)
             }
         }
@@ -379,7 +379,7 @@ class HomeScreenViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                onError(error.message ?: "Subscription update failed")
+                onError(error.message ?: "Не удалось обновить подписку")
             }
         }
     }

@@ -52,10 +52,10 @@ fun PingButton(
     var pingState by remember { mutableStateOf<PingState>(PingState.Idle) }
 
     val descriptionText = when (pingState) {
-        is PingState.Error -> "Offline"
-        is PingState.Loading -> "Checking..."
-        is PingState.Success -> "Connected ${(pingState as PingState.Success).latency}ms"
-        else -> "Click To Verify Reachability"
+        is PingState.Error -> "Недоступен"
+        is PingState.Loading -> "Проверка..."
+        is PingState.Success -> "Доступен · ${(pingState as PingState.Success).latency} мс"
+        else -> "Проверить доступность"
     }
 
     val stateIcon: @Composable () -> Unit = {
@@ -107,7 +107,7 @@ fun PingButton(
                     pingState = if (result != null) {
                         PingState.Success(result)
                     } else {
-                        PingState.Error("Offline")
+                        PingState.Error("Недоступен")
                     }
                 }
             }
@@ -133,7 +133,7 @@ fun PingButton(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Connectivity Check",
+                    text = "Проверка связи",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface

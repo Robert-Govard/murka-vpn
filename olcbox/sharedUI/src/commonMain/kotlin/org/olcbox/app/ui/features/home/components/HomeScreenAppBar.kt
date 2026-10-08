@@ -34,7 +34,7 @@ fun HomeScreenAppBar(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "VPN · emergency mode",
+                    text = "VPN и аварийный режим",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -45,7 +45,7 @@ fun HomeScreenAppBar(
                 IconButton(onClick = onAppSettingsClick) {
                     Icon(
                         imageVector = Icons.Outlined.Settings,
-                        contentDescription = "Application settings",
+                        contentDescription = "Настройки приложения",
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -53,7 +53,7 @@ fun HomeScreenAppBar(
                 IconButton(onClick = onHistoryClick) {
                     Icon(
                         imageVector = Icons.Outlined.History,
-                        contentDescription = "History",
+                        contentDescription = "Журнал",
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -64,7 +64,7 @@ fun HomeScreenAppBar(
                 IconButton(onClick = onSplitTunnelingClick) {
                     Icon(
                         imageVector = Icons.Outlined.Shield,
-                        contentDescription = "Split tunneling",
+                        contentDescription = "Раздельное туннелирование",
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -72,7 +72,7 @@ fun HomeScreenAppBar(
             IconButton(onClick = onAddClick) {
                 Icon(
                     imageVector = Icons.Outlined.Add,
-                    contentDescription = "Add configuration",
+                    contentDescription = "Добавить подключение",
                     tint = MaterialTheme.colorScheme.onSurface
                 )
             }

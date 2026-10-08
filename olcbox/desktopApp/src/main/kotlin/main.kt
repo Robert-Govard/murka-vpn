@@ -194,7 +194,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
             val checkStartedAt = kotlin.time.Clock.System.now().toEpochMilliseconds()
             if (!manual && !previousSettings.isUpdateCheckDue(checkStartedAt)) return@launch
 
-            updateMessage = "Checking ${previousSettings.channel.name.lowercase()}..."
+            updateMessage = "Проверка обновлений..."
             val result = dependencies.updateService.check(previousSettings.channel)
             val checkedAt = kotlin.time.Clock.System.now().toEpochMilliseconds()
             val checkedSettings = previousSettings.copy(lastCheckAtEpochMs = checkedAt).normalized()
@@ -204,10 +204,10 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                     if (manual || info.shouldShowOffer(previousSettings, checkedAt)) {
                         if (info.isDownloaded(checkedSettings)) {
                             updateOffer = null
-                            updateMessage = "Latest ${info.channel.name.lowercase()} is already downloaded"
+                            updateMessage = "Последняя версия уже скачана"
                         } else if (info.isUpdateAvailable) {
                             updateOffer = info
-                            updateMessage = "${info.channel.name} update found: ${info.version}"
+                            updateMessage = "Найдено обновление: ${info.version}"
                         } else {
                             updateOffer = null
                             updateMessage = "Мурка VPN is up to date"
@@ -218,7 +218,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                     }
                 },
                 onFailure = { error ->
-                    updateMessage = error.message ?: "Update check failed"
+                    updateMessage = error.message ?: "Не удалось проверить обновления"
                 }
             )
         }
@@ -227,12 +227,12 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
     fun downloadUpdate(info: AppUpdateInfo) {
         scope.launch {
             updateProgress = 0f
-            updateMessage = "Downloading ${info.asset.name}..."
+            updateMessage = "Скачивание ${info.asset.name}..."
             val result = dependencies.updateInstaller.downloadAndOpen(info.asset) { progress ->
                 updateProgress = progress
             }
             updateMessage = result.getOrElse { error ->
-                "Download failed: ${error.message ?: "unknown error"}"
+                "Не удалось скачать: ${error.message ?: "неизвестная ошибка"}"
             }
             if (result.isSuccess) {
                 saveUpdateSettings(
@@ -278,20 +278,20 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
         icon = painterResource("LinuxIcon.png"),
         tooltip = "Мурка VPN",
         menu = {
-            Item("Open", onClick = { isWindowVisible = true })
+            Item("Открыть", onClick = { isWindowVisible = true })
             Item(
-                if (trayHomeState.isVpnConnected || trayHomeState.isVpnLoading) "Stop" else "Start",
+                if (trayHomeState.isVpnConnected || trayHomeState.isVpnLoading) "Остановить" else "Запустить",
                 enabled = trayHomeState.isVpnConnected || trayHomeState.isVpnLoading || trayHomeState.canStartVpn,
                 onClick = {
                     dependencies.homeViewModel.ToggleVpn()
                 }
             )
-            Item("Settings", onClick = {
+            Item("Настройки", onClick = {
                 isWindowVisible = true
                 showDesktopSettings = true
             })
             Separator()
-            Item("Quit", onClick = {
+            Item("Выход", onClick = {
                 dependencies.close()
                 exitApplication()
             })
@@ -375,7 +375,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                         dependencies.homeViewModel.onCopyFullConfigClicked()
                     },
                     onShareLocationRequested = { config ->
-                        sharePayload = "Location QR" to ConfigShareService.olcRtcUri(config)
+                        sharePayload = "QR-код сервера" to ConfigShareService.olcRtcUri(config)
                     },
                     onSaveLogsRequested = { onSaved, onError ->
                         chooseSaveFile(
@@ -412,10 +412,10 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                         connectionSummary = "${socksProxySettings.routingMode.effectiveDisplayName()} · " +
                             "SOCKS5 ${socksProxySettings.host}:${socksProxySettings.port}",
                         connectionDetails = buildList {
-                            add("Mode" to socksProxySettings.routingMode.effectiveDisplayName())
+                            add("Режим" to socksProxySettings.routingMode.effectiveDisplayName())
                             if (socksProxySettings.routingMode.effectiveMode() == DesktopRoutingMode.SystemProxy) {
                                 add("PAC URL" to "http://127.0.0.1:10809/proxy.pac")
-                                add("PAC Target" to "SOCKS5 ${socksProxySettings.host}:${socksProxySettings.port}")
+                                add("Цель PAC" to "SOCKS5 ${socksProxySettings.host}:${socksProxySettings.port}")
                             }
                         },
                         socksProxySettings = socksProxySettings.toApplicationSocksProxySettings(),
@@ -431,7 +431,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                         onDismiss = { showDesktopSettings = false },
                         onCopyConfigClick = {
                             dependencies.homeViewModel.onCopyFullConfigClicked()
-                            desktopNotice = "Copied"
+                            desktopNotice = "Скопировано"
                         },
                         onSaveLogsClick = {
                             chooseSaveFile(
@@ -460,16 +460,16 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                         onDownloadUpdateClick = { info -> downloadUpdate(info) },
                         onLaterUpdateClick = { info -> postponeUpdate(info) },
                         onSubscriptionShareClick = { url ->
-                            sharePayload = "Subscription QR" to ConfigShareService.subscriptionQrText(url)
+                            sharePayload = "QR-код подписки" to ConfigShareService.subscriptionQrText(url)
                         },
                         onSubscriptionRefreshClick = { url, onFinished ->
                             dependencies.homeViewModel.refreshSubscription(url) { updatedCount ->
                                 reloadLocationsAfterImport {
                                     dependencies.homeViewModel.restartVpnIfRunning()
                                     updateMessage = if (updatedCount > 0) {
-                                        "Subscription updated"
+                                        "Подписка обновлена"
                                     } else {
-                                        "Subscription not updated"
+                                        "Подписка не обновлена"
                                     }
                                     onFinished()
                                 }
@@ -479,9 +479,9 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                             dependencies.homeViewModel.setSubscriptionRefreshInterval(url, intervalMs) {
                                 dependencies.locationViewModel.loadLocations()
                                 updateMessage = if (intervalMs == null) {
-                                    "Subscription refresh set to Auto"
+                                    "Обновление подписки: автоматически"
                                 } else {
-                                    "Subscription refresh rate saved"
+                                    "Период обновления сохранён"
                                 }
                             }
                         },
@@ -490,7 +490,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                                 reloadLocationsAfterImport {
                                     dependencies.homeViewModel.restartVpnIfRunning()
                                     updateMessage =
-                                        "Subscription deleted · $removedLocations locations removed"
+                                        "Подписка удалена · серверов удалено: $removedLocations"
                                 }
                             }
                         },
@@ -504,7 +504,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                             scope.launch {
                                 dependencies.socksProxySettingsStore.save(settings)
                             }
-                            desktopNotice = "SOCKS proxy saved"
+                            desktopNotice = "SOCKS-прокси сохранён"
                             if (homeState.isVpnConnected) {
                                 dependencies.homeViewModel.restartVpnIfRunning()
                             }
@@ -517,7 +517,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                             scope.launch {
                                 dependencies.socksProxySettingsStore.save(settings)
                             }
-                            desktopNotice = "Password regenerated"
+                            desktopNotice = "Пароль обновлён"
                             if (homeState.isVpnConnected) {
                                 dependencies.homeViewModel.restartVpnIfRunning()
                             }
@@ -531,7 +531,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                                 scope.launch {
                                     dependencies.socksProxySettingsStore.save(settings)
                                 }
-                                desktopNotice = "Connection mode saved"
+                                desktopNotice = "Режим подключения сохранён"
                                 if (homeState.isVpnConnected) {
                                     dependencies.homeViewModel.restartVpnIfRunning()
                                 }
@@ -555,7 +555,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                         payload = payload,
                         onCopy = {
                             dependencies.configImporter.copyToClipboard(payload)
-                            desktopNotice = "Copied"
+                            desktopNotice = "Скопировано"
                         },
                         onDismiss = {
                             sharePayload = null
@@ -630,7 +630,7 @@ private fun DesktopConfigShareOverlay(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = if (copied) "Copied to clipboard" else "Scan QR or copy the link",
+                            text = if (copied) "Скопировано в буфер обмена" else "Отсканируйте QR-код или скопируйте ссылку",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 13.sp
                         )
@@ -675,7 +675,7 @@ private fun DesktopConfigShareOverlay(
                         horizontalArrangement = Arrangement.End
                     ) {
                         TextButton(onClick = onDismiss) {
-                            Text("Close")
+                            Text("Закрыть")
                         }
                         Spacer(Modifier.width(8.dp))
                         Button(
@@ -684,7 +684,7 @@ private fun DesktopConfigShareOverlay(
                                 copied = true
                             }
                         ) {
-                            Text("Copy")
+                            Text("Копировать")
                         }
                     }
                 }
@@ -793,14 +793,14 @@ private fun desktopSubscriptionItems(items: List<LocationItem>): List<Subscripti
 }
 
 private fun chooseConfigFile(owner: Frame): File? {
-    val dialog = FileDialog(owner, "Import Olcbox Config", FileDialog.LOAD)
+    val dialog = FileDialog(owner, "Импорт конфигурации", FileDialog.LOAD)
     dialog.isVisible = true
 
     return dialog.files.firstOrNull()
 }
 
 private fun chooseSaveFile(owner: Frame, defaultName: String): File? {
-    val dialog = FileDialog(owner, "Save Olcbox Logs", FileDialog.SAVE)
+    val dialog = FileDialog(owner, "Сохранить журнал", FileDialog.SAVE)
     dialog.file = defaultName
     dialog.isVisible = true
 
