@@ -72,7 +72,39 @@ class MacTunControllerTest {
         )
         assertTrue("cp '/Users/a b/helper.sh'" in cmd)
         assertTrue("'/Users/a b/hev' '/Users/a b/hev.yml' 42 '/Users/a b/stop'" in cmd)
-        assertTrue(cmd.endsWith("&"))
+        assertTrue(cmd.endsWith("& }"))
+    }
+
+    /**
+     * The helper lives for the whole session, so the launch command must detach it
+     * fully: osascript waits while anything still holds its stdin/stdout/stderr, and
+     * the app then hangs on "connecting" forever.
+     */
+    @Test
+    fun osascriptReturnsWhileHelperKeepsRunning() {
+        if (!System.getProperty("os.name").startsWith("Mac")) return
+        val dir = Files.createTempDirectory("murka-osa-test")
+        try {
+            val helper = executable(dir.resolve("helper.sh"), "#!/bin/sh\nsleep 15\n")
+            val command = MacTunController.launchCommand(
+                helper = helper,
+                hevBinary = dir.resolve("hev"),
+                config = dir.resolve("hev.yml"),
+                appPid = ProcessHandle.current().pid(),
+                stopFile = dir.resolve("stop")
+            )
+            // Same AppleScript as production, minus the admin prompt.
+            val script = MacTunController.adminAppleScript(command, "test")
+                .substringBefore(" with prompt")
+            val started = System.currentTimeMillis()
+            val osascript = ProcessBuilder("/usr/bin/osascript", "-e", script).redirectErrorStream(true).start()
+            val returned = osascript.waitFor(8, TimeUnit.SECONDS)
+            if (!returned) osascript.destroyForcibly()
+            assertTrue(returned, "osascript still waiting after ${System.currentTimeMillis() - started} ms")
+            assertEquals(0, osascript.exitValue(), osascript.inputStream.bufferedReader().readText())
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
     }
 
     /** Runs the real helper unprivileged with a fake hev and a recording `route`. */
