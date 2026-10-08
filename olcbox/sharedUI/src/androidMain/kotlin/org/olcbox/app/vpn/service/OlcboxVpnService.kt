@@ -1,5 +1,10 @@
 package org.olcbox.app.vpn.service
 
+import xraymobile.Xraymobile
+import org.olcbox.app.data.model.LocationEntry
+import org.olcbox.app.vpn.failover.Socks5HttpProbe
+import org.olcbox.app.vpn.failover.FailoverHint
+import org.olcbox.app.vpn.failover.FailoverAdvisor
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -93,6 +98,8 @@ class OlcboxVpnService : VpnService() {
 
     private var startupJob: Job? = null
     private var watchdogJob: Job? = null
+    private var failoverJob: Job? = null
+    private val failoverAdvisor = FailoverAdvisor()
     private var cleanupJob: Job? = null
     private var networkLossJob: Job? = null
     private var recoveryJob: Job? = null
@@ -263,6 +270,10 @@ class OlcboxVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == OlcboxVpnActions.ACTION_SWITCH_LOCATION) {
+            switchToSuggestedLocation(intent.getStringExtra(OlcboxVpnActions.EXTRA_STORAGE_ID))
+            return START_REDELIVER_INTENT
+        }
         when (intent?.action) {
             OlcboxVpnActions.ACTION_STOP_VPN -> {
                 addLog("Stop VPN requested")
@@ -913,6 +924,7 @@ class OlcboxVpnService : VpnService() {
     }
 
     private fun startWatchdog() {
+        startFailoverMonitor()
         watchdogJob?.cancel()
         watchdogTunStats = null
         watchdogStalledSamples = 0
@@ -970,7 +982,111 @@ class OlcboxVpnService : VpnService() {
         }
     }
 
+    /**
+     * Murka VPN hints: on a regular (Xray) server, probe through the tunnel and
+     * offer emergency mode when it stops working; in emergency mode, probe the
+     * regular server outside the tunnel and offer to go back. Never switches alone.
+     */
+    private fun startFailoverMonitor() {
+        failoverJob?.cancel()
+        failoverJob = scope.launch {
+            val bundle = repository.getBundle()
+            val active = repository.getActiveLocation() ?: return@launch
+            failoverAdvisor.onConnected(active, bundle.locations, System.currentTimeMillis())
+            while (isActive) {
+                delay(FAILOVER_PROBE_INTERVAL_MS)
+                if (OlcboxVpnState.status.value !is VpnStatus.Connected) continue
+                val now = System.currentTimeMillis()
+                val hint = if (activeCoreIsXray) {
+                    val ok = withContext(Dispatchers.IO) {
+                        Socks5HttpProbe.probe(socksConnectHost(), socksListenPort, socksUsername, socksPassword)
+                    }
+                    failoverAdvisor.onTunnelProbe(ok, hasNetwork = findActiveUpstreamNetwork() != null, nowMs = now)
+                } else {
+                    val regular = failoverAdvisor.regularToProbe(now) ?: continue
+                    val ok = withContext(Dispatchers.IO) {
+                        // Outside the tunnel: otherwise the probe would succeed through olcRTC.
+                        Xraymobile.setProtector(object : xraymobile.SocketProtector {
+                            override fun protect(fd: Long): Boolean = this@OlcboxVpnService.protect(fd.toInt())
+                        })
+                        runCatching {
+                            Xraymobile.check(XrayConfig.forCheck(regular.location.xrayConfig), FAILOVER_CHECK_URL, 8_000L) >= 0
+                        }.getOrDefault(false)
+                    }
+                    failoverAdvisor.onRegularProbe(ok, now)
+                }
+                if (hint != null) showFailoverHint(hint, bundle.locations)
+            }
+        }
+    }
+
+    private fun showFailoverHint(hint: FailoverHint, locations: List<LocationEntry>) {
+        val storageId = when (hint) {
+            is FailoverHint.UseEmergency -> hint.storageId
+            is FailoverHint.ReturnToRegular -> hint.storageId
+        }
+        val name = locations.firstOrNull { it.storageId == storageId }?.location?.displayName().orEmpty()
+        val (title, text, button) = when (hint) {
+            is FailoverHint.UseEmergency -> Triple(
+                "Обычный VPN не работает в этой сети",
+                "Включите аварийный режим ($name)",
+                "Включить аварийный режим"
+            )
+            is FailoverHint.ReturnToRegular -> Triple(
+                "Обычный VPN снова работает",
+                "Можно вернуться на $name — он быстрее",
+                "Вернуться"
+            )
+        }
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(HINT_CHANNEL_ID, "Подсказки", NotificationManager.IMPORTANCE_DEFAULT)
+            )
+        }
+        val switchIntent = PendingIntent.getService(
+            this,
+            HINT_NOTIFICATION_ID,
+            Intent(this, OlcboxVpnService::class.java).apply {
+                action = OlcboxVpnActions.ACTION_SWITCH_LOCATION
+                putExtra(OlcboxVpnActions.EXTRA_STORAGE_ID, storageId)
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        manager.notify(
+            HINT_NOTIFICATION_ID,
+            NotificationCompat.Builder(this, HINT_CHANNEL_ID)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentIntent(getAppPendingIntent())
+                .setAutoCancel(true)
+                .addAction(0, button, switchIntent)
+                .build()
+        )
+        addLog("Hint: $title")
+    }
+
+    private fun cancelFailoverHint() {
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(HINT_NOTIFICATION_ID)
+    }
+
+    private fun switchToSuggestedLocation(storageId: String?) {
+        cancelFailoverHint()
+        if (storageId.isNullOrBlank()) return
+        scope.launch {
+            repository.setActiveLocationId(storageId)
+            val running = OlcboxVpnState.status.value.let { it is VpnStatus.Connected || it is VpnStatus.Reconnecting }
+            if (running) {
+                addLog("Switching to the suggested location")
+                startTunnel(isMigration = false, isRestart = true)
+            }
+        }
+    }
+
     private fun cleanup(stopService: Boolean = true) {
+        failoverJob?.cancel()
+        cancelFailoverHint()
         if (cleanupJob?.isActive == true) return
 
         val status = OlcboxVpnState.status.value
@@ -1804,6 +1920,10 @@ class OlcboxVpnService : VpnService() {
         private const val MAPDNS_NETMASK = "255.192.0.0"
         private const val NOTIFICATION_CHANNEL_ID = "olcbox_vpn"
         private const val NOTIFICATION_ID = 100
+        private const val HINT_CHANNEL_ID = "murka_hints"
+        private const val HINT_NOTIFICATION_ID = 101
+        private const val FAILOVER_PROBE_INTERVAL_MS = 30_000L
+        private const val FAILOVER_CHECK_URL = "https://www.gstatic.com/generate_204"
         private const val TAG = "OlcboxVpnService"
 
         private fun addLog(msg: String) {
