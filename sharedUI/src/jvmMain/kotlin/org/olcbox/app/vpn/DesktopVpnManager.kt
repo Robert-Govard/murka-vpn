@@ -29,6 +29,7 @@ import org.olcbox.app.vpn.desktop.DesktopDnsResolver
 import org.olcbox.app.vpn.desktop.DesktopProxyController
 import org.olcbox.app.vpn.desktop.LinuxPrivilege
 import org.olcbox.app.vpn.desktop.LinuxTunController
+import org.olcbox.app.vpn.desktop.MacTunController
 import org.olcbox.app.vpn.desktop.OlcRtcCommand
 import org.olcbox.app.vpn.desktop.PacServer
 import org.olcbox.app.vpn.desktop.WindowsTunController
@@ -79,6 +80,7 @@ class DesktopVpnManager private constructor(
     private var generation = 0L
     private val linuxTunController = LinuxTunController(::addLog)
     private val windowsTunController = WindowsTunController(::addLog)
+    private val macTunController = MacTunController(::addLog)
 
     override fun needsPermission(): Boolean = false
 
@@ -208,12 +210,14 @@ class DesktopVpnManager private constructor(
                 windowsTunController.ensureAdministratorOrRequestRestart()
             }
 
+            // Cores bind to the physical interface so their own traffic skips the TUN.
+            val bindInterface = when (desktopMode) {
+                DesktopMode.WindowsTun -> if (location.isXray) windowsTunController.detectPhysicalInterface() else null
+                DesktopMode.MacTun -> macTunController.detectPhysicalInterface()
+                else -> null
+            }
+
             process = if (location.isXray) {
-                val bindInterface = if (desktopMode == DesktopMode.WindowsTun) {
-                    windowsTunController.detectPhysicalInterface()
-                } else {
-                    null
-                }
                 startXrayProcess(
                     location = location,
                     socksSettings = socksSettings,
@@ -229,7 +233,8 @@ class DesktopVpnManager private constructor(
                     ready = ready,
                     startupFailure = startupFailure,
                     logOutput = true,
-                    privileged = desktopMode == DesktopMode.LinuxTun
+                    privileged = desktopMode == DesktopMode.LinuxTun,
+                    bindInterface = bindInterface
                 )
             }
 
@@ -249,6 +254,7 @@ class DesktopVpnManager private constructor(
             when (desktopMode) {
                 DesktopMode.LinuxTun -> startLinuxTun(socksSettings.port, requestGeneration)
                 DesktopMode.WindowsTun -> startWindowsTun(socksSettings.port, requestGeneration)
+                DesktopMode.MacTun -> startMacTun(socksSettings, location.isXray, requestGeneration)
                 DesktopMode.SystemProxy -> startSystemProxy(socksSettings, requestGeneration)
                 DesktopMode.LocalSocks -> Unit
             }
@@ -269,6 +275,7 @@ class DesktopVpnManager private constructor(
                 when (desktopMode) {
                     DesktopMode.LinuxTun -> "Desktop Linux TUN connected"
                     DesktopMode.WindowsTun -> "Desktop Windows TUN connected"
+                    DesktopMode.MacTun -> "Desktop macOS TUN connected"
                     DesktopMode.SystemProxy -> "Desktop proxy connected"
                     DesktopMode.LocalSocks -> "Desktop local SOCKS proxy connected"
                 }
@@ -310,6 +317,26 @@ class DesktopVpnManager private constructor(
         startTunLogReader(tunProcess ?: error("tun2socks process is missing"))
     }
 
+    private suspend fun startMacTun(
+        socksSettings: DesktopSocksProxySettings,
+        isXray: Boolean,
+        requestGeneration: Long
+    ) {
+        tunProcess = macTunController.start(
+            hevBinary = DesktopNativeAssets.resolveHevSocks5TunnelBinary(),
+            socksPort = socksSettings.port,
+            socksUsername = socksSettings.username,
+            socksPassword = socksSettings.password,
+            udpOverTcp = !isXray
+        )
+
+        if (requestGeneration != generation) {
+            throw CancellationException("Desktop start superseded")
+        }
+
+        startTunLogReader(tunProcess ?: error("macOS TUN monitor is missing"))
+    }
+
     private suspend fun startSystemProxy(
         socksSettings: DesktopSocksProxySettings,
         requestGeneration: Long
@@ -330,6 +357,7 @@ class DesktopVpnManager private constructor(
     private enum class DesktopMode {
         LinuxTun,
         WindowsTun,
+        MacTun,
         SystemProxy,
         LocalSocks;
 
@@ -339,7 +367,7 @@ class DesktopVpnManager private constructor(
                     DesktopRoutingMode.Tun -> when (DesktopPaths.os) {
                         DesktopOs.Linux -> LinuxTun
                         DesktopOs.Windows -> WindowsTun
-                        DesktopOs.MacOS,
+                        DesktopOs.MacOS -> MacTun
                         DesktopOs.Other -> SystemProxy
                     }
                     DesktopRoutingMode.SystemProxy -> SystemProxy
@@ -356,7 +384,8 @@ class DesktopVpnManager private constructor(
         ready: CompletableDeferred<Unit>,
         startupFailure: CompletableDeferred<String>,
         logOutput: Boolean,
-        privileged: Boolean
+        privileged: Boolean,
+        bindInterface: String? = null
     ): Process {
         val binaries = DesktopNativeAssets.resolveOlcRtcBinaryCandidates()
         val dnsServer = location.dnsServer.ifBlank { DesktopDnsResolver.current() }
@@ -374,7 +403,8 @@ class DesktopVpnManager private constructor(
                     startupFailure = startupFailure,
                     logOutput = logOutput,
                     privileged = privileged,
-                    dnsServer = dnsServer
+                    dnsServer = dnsServer,
+                    bindInterface = bindInterface
                 )
             } catch (e: Exception) {
                 lastException = e
@@ -415,6 +445,14 @@ class DesktopVpnManager private constructor(
                 }
                 tunProcess = null
             }
+            DesktopMode.MacTun -> {
+                runCatching {
+                    macTunController.stop(tunProcess)
+                }.onFailure {
+                    addLog("macOS TUN stop failed: ${it.message}")
+                }
+                tunProcess = null
+            }
             DesktopMode.SystemProxy -> {
                 runCatching {
                     proxyController.restore()
@@ -441,6 +479,7 @@ class DesktopVpnManager private constructor(
                 when (stoppedMode) {
                     DesktopMode.LinuxTun -> "Desktop Linux TUN stopped"
                     DesktopMode.WindowsTun -> "Desktop Windows TUN stopped"
+                    DesktopMode.MacTun -> "Desktop macOS TUN stopped"
                     DesktopMode.SystemProxy -> "Desktop proxy stopped"
                     DesktopMode.LocalSocks -> "Desktop local SOCKS proxy stopped"
                     null -> "Desktop connection stopped"
@@ -471,7 +510,8 @@ class DesktopVpnManager private constructor(
         startupFailure: CompletableDeferred<String>,
         logOutput: Boolean,
         privileged: Boolean,
-        dnsServer: String
+        dnsServer: String,
+        bindInterface: String?
     ): Process {
         val config = location.normalized()
         val provider = OlcRtcCommand.desktopProviderArg(config.bypassProvider)
@@ -482,7 +522,8 @@ class DesktopVpnManager private constructor(
             socksPort = socksSettings.port,
             socksUser = socksSettings.username,
             socksPass = socksSettings.password,
-            dnsServer = dnsServer
+            dnsServer = dnsServer,
+            bindInterface = bindInterface
         )
         val configPath = writeOlcRtcClientConfig(olcRtcCommand)
         val command = olcRtcCommand.args(configPath)
@@ -653,7 +694,8 @@ class DesktopVpnManager private constructor(
 
         when (desktopMode) {
             DesktopMode.LinuxTun,
-            DesktopMode.WindowsTun -> startTunExitWatcher(
+            DesktopMode.WindowsTun,
+            DesktopMode.MacTun -> startTunExitWatcher(
                 currentTunProcess ?: error("TUN process is missing"),
                 requestGeneration
             )

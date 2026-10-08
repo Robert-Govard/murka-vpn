@@ -399,6 +399,30 @@ if (currentBuildOs.isLinux) {
     hostDesktopNativeAssetTasks.add(buildHevSocks5TunnelLinux)
 }
 
+if (currentBuildOs.isMacOsX) {
+    // macOS TUN mode (MacTunController). Built from a copy so the shared Android
+    // jni tree stays clean; newer clang flags this upstream warning under -Werror.
+    val buildHevSocks5TunnelMac = tasks.register<Exec>("buildHevSocks5TunnelMac") {
+        val outputFile = generatedNativeResources.map {
+            it.file("native/hev-socks5-tunnel-darwin-$hostDesktopArch")
+        }
+        val output = outputFile.get().asFile
+        val workDir = layout.buildDirectory.dir("tmp/hev-socks5-tunnel-mac").get().asFile
+
+        inputs.dir(hevSocks5TunnelSourceDir)
+        outputs.file(outputFile)
+        commandLine(
+            "sh",
+            "-c",
+            "rm -rf ${shellQuote(workDir.absolutePath)} && mkdir -p ${shellQuote(workDir.parentFile.absolutePath)} && cp -R ${shellQuote(hevSocks5TunnelSourceDir.asFile.absolutePath)} ${shellQuote(workDir.absolutePath)} && " +
+                "cd ${shellQuote(workDir.absolutePath)} && make exec CFLAGS='-Wno-uninitialized-const-pointer -Wno-unknown-warning-option' && " +
+                "mkdir -p ${shellQuote(output.parentFile.absolutePath)} && install -m 0755 bin/hev-socks5-tunnel ${shellQuote(output.absolutePath)}"
+        )
+    }
+    desktopNativeAssetTasks.add(buildHevSocks5TunnelMac)
+    hostDesktopNativeAssetTasks.add(buildHevSocks5TunnelMac)
+}
+
 if (currentBuildOs.isWindows) {
     val tun2SocksWindowsOutput = generatedNativeResources.map {
         it.file("native/tun2socks-windows-amd64.exe")
@@ -443,6 +467,7 @@ fun requiredHostNativeResourcePaths(): List<String> = buildList {
             add("native/xray-darwin-$hostDesktopArch")
             add("native/olcrtc-darwin-$hostDesktopArch")
             add("native/libolcrtc-darwin-$hostDesktopArch.dylib")
+            add("native/hev-socks5-tunnel-darwin-$hostDesktopArch")
         }
         currentBuildOs.isWindows -> {
             add("native/xray-windows-amd64.exe")

@@ -121,6 +121,25 @@ class DesktopProxyModeTest {
     }
 
     @Test
+    fun olcRtcCommandBindsToPhysicalInterfaceOnlyWhenAsked() {
+        fun yaml(bind: String?) = OlcRtcCommand(
+            binary = Path.of("/tmp/olcrtc"),
+            location = LocationConfig(
+                name = "WB",
+                id = "room-wb",
+                key = "b".repeat(64),
+                bypassProvider = LocationConfig.PROVIDER_WB_STREAM,
+                transport = LocationConfig.TRANSPORT_DATACHANNEL
+            ),
+            dnsServer = "192.168.50.1:53",
+            bindInterface = bind
+        ).yaml()
+
+        assertContains(yaml("en0"), "  bind_interface: 'en0'")
+        assertTrue("bind_interface" !in yaml(null))
+    }
+
+    @Test
     fun olcRtcCommandAddsSeiDefaults() {
         val command = OlcRtcCommand(
             binary = Path.of("/tmp/olcrtc"),

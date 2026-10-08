@@ -11,7 +11,9 @@ internal data class OlcRtcCommand(
     val socksUser: String = "",
     val socksPass: String = "",
     val dnsServer: String,
-    val dataDir: Path? = null
+    val dataDir: Path? = null,
+    /** Physical interface for olcRTC's own sockets while the macOS TUN owns the default route. */
+    val bindInterface: String? = null
 ) {
     fun args(configPath: Path): List<String> {
         return listOf(binary.toString(), configPath.toString())
@@ -32,6 +34,7 @@ internal data class OlcRtcCommand(
             appendLine("net:")
             appendLine("  transport: ${config.transport.yamlValue()}")
             appendLine("  dns: ${dnsServer.yamlValue()}")
+            bindInterface?.let { appendLine("  bind_interface: ${it.yamlValue()}") }
             appendLine("socks:")
             appendLine("  host: ${socksHost.yamlValue()}")
             appendLine("  port: $socksPort")

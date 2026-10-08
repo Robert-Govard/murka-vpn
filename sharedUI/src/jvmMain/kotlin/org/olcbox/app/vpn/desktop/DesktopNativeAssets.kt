@@ -165,6 +165,7 @@ internal object DesktopNativeAssets {
     fun hevSocks5TunnelFileName(): String {
         return when (DesktopPaths.os) {
             DesktopOs.Linux -> "hev-socks5-tunnel-linux-${desktopArch()}"
+            DesktopOs.MacOS -> "hev-socks5-tunnel-darwin-${desktopArch()}"
             else -> error("hev-socks5-tunnel desktop binary is only used for TUN mode")
         }
     }
