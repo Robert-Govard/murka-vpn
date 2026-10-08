@@ -42,6 +42,7 @@ internal class UpdateDownloadCache(private val directory: File) {
                 val contentLength = connection.contentLengthLong.takeIf { it > 0L }
                 val total = asset.sizeBytes ?: contentLength
                 var copied = 0L
+                var reportedPercent = -1
                 connection.inputStream.use { input ->
                     partial.outputStream().use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -51,8 +52,14 @@ internal class UpdateDownloadCache(private val directory: File) {
                             if (read < 0) break
                             output.write(buffer, 0, read)
                             copied += read
-                            if (total != null && total > 0L) {
-                                onProgress((copied.toDouble() / total).toFloat().coerceIn(0f, 1f))
+                            // Callers hop to the UI thread on every report, so only report whole
+                            // percents: once per 8 KB chunk stalled big desktop downloads.
+                            val percent = if (total != null && total > 0L) {
+                                (copied * 100 / total).toInt().coerceIn(0, 99)
+                            } else -1
+                            if (percent > reportedPercent) {
+                                reportedPercent = percent
+                                onProgress(percent / 100f)
                             }
                         }
                     }
