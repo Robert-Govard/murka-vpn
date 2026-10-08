@@ -56,7 +56,19 @@ class UpdateDownloadCacheTest {
         }
     }
 
+    @Test
+    fun progressIsReportedOncePerPercent() = runBlocking {
+        withDownloadServer(size = 1 shl 20) { directory, url, _ ->
+            val updates = mutableListOf<Float>()
+            UpdateDownloadCache(directory).download(AppUpdateAsset("update.apk", url, 1L shl 20)) { updates += it }
+            // Every report hops to the UI thread; one per 8 KB chunk froze big desktop downloads.
+            assertTrue(updates.size <= 101, "got ${updates.size} progress reports")
+            assertEquals(1f, updates.last())
+        }
+    }
+
     private suspend fun withDownloadServer(
+        size: Int = 8192,
         block: suspend (java.io.File, String, () -> Int) -> Unit
     ) {
         val directory = Files.createTempDirectory("olcbox-update-test").toFile()
@@ -64,7 +76,7 @@ class UpdateDownloadCacheTest {
         val requests = java.util.concurrent.atomic.AtomicInteger()
         server.createContext("/update.apk") { exchange ->
             requests.incrementAndGet()
-            val payload = ByteArray(8192) { (it % 251).toByte() }
+            val payload = ByteArray(size) { (it % 251).toByte() }
             exchange.sendResponseHeaders(200, payload.size.toLong())
             exchange.responseBody.use { it.write(payload) }
         }

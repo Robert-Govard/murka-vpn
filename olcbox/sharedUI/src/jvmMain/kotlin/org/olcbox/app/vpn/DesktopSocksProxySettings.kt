@@ -13,23 +13,23 @@ enum class DesktopRoutingMode {
     LocalSocks;
 
     fun displayName(): String = when (this) {
-        Auto -> "Auto"
-        Tun -> "TUN"
-        SystemProxy -> "System proxy"
-        LocalSocks -> "Local SOCKS only"
+        Auto -> "Авто"
+        Tun -> "Системный VPN"
+        SystemProxy -> "Системный прокси"
+        LocalSocks -> "Только локальный SOCKS"
     }
 
     fun description(): String = when (this) {
-        Auto -> "Use the recommended mode for this operating system"
-        Tun -> "Route system traffic through a virtual network adapter"
-        SystemProxy -> "Configure the operating system proxy automatically"
-        LocalSocks -> "Expose SOCKS5 without changing system routing"
+        Auto -> "Рекомендуемый режим для этой системы"
+        Tun -> "Весь трафик компьютера, включая Telegram, идёт через VPN"
+        SystemProxy -> "Через VPN идут браузеры и программы, которые используют системный прокси"
+        LocalSocks -> "Только SOCKS5-прокси, системные настройки не меняются"
     }
 
     fun effectiveDisplayName(): String = when (resolveForCurrentPlatform()) {
-        Tun -> "TUN"
-        SystemProxy -> "System proxy"
-        LocalSocks -> "Local SOCKS only"
+        Tun -> "Системный VPN"
+        SystemProxy -> "Системный прокси"
+        LocalSocks -> "Только локальный SOCKS"
         Auto -> error("Auto must resolve to a concrete desktop routing mode")
     }
 
@@ -39,8 +39,8 @@ enum class DesktopRoutingMode {
         if (this != Auto) return this
         return when (DesktopPaths.os) {
             DesktopOs.Linux,
-            DesktopOs.Windows -> Tun
-            DesktopOs.MacOS -> SystemProxy
+            DesktopOs.Windows,
+            DesktopOs.MacOS -> Tun
             DesktopOs.Other -> LocalSocks
         }
     }
@@ -48,7 +48,7 @@ enum class DesktopRoutingMode {
     companion object {
         fun availableForCurrentPlatform(): List<DesktopRoutingMode> = buildList {
             add(Auto)
-            if (DesktopPaths.os == DesktopOs.Linux || DesktopPaths.os == DesktopOs.Windows) {
+            if (DesktopPaths.os != DesktopOs.Other) {
                 add(Tun)
             }
             if (DesktopPaths.os == DesktopOs.MacOS || DesktopPaths.os == DesktopOs.Windows) {
