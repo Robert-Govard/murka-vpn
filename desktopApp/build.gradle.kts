@@ -538,7 +538,7 @@ compose.desktop {
             }
             windows {
                 iconFile.set(project.file("appIcons/WindowsIcon.ico"))
-                menuGroup = "Мурка VPN"
+                menuGroup = "Murka VPN"
                 shortcut = true
                 dirChooser = true
                 upgradeUuid = "68ff6308-ce5e-434d-b3d0-87113b74c57c"
