@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"strings"
 	"context"
 	"errors"
 	"fmt"
@@ -198,4 +199,20 @@ func freeProbePort(t *testing.T) int {
 		t.Fatalf("release test port: %v", err)
 	}
 	return port
+}
+
+// Desktop clients pass the system DNS: public resolvers may not answer
+// under whitelists or behind another VPN client.
+func TestProbeUsesRuntimeDNS(t *testing.T) {
+	r := New()
+	if err := r.SetDNS("192.0.2.53:53"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := r.probeConfig("wbstream", "vp8channel", "room-1", "dev", strings.Repeat("a", 64), 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DNSServer != "192.0.2.53:53" {
+		t.Fatalf("probe DNS = %q, want 192.0.2.53:53", cfg.DNSServer)
+	}
 }

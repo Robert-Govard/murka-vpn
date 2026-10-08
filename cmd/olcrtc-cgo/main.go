@@ -78,6 +78,19 @@ func Check(
 	return C.longlong(result)
 }
 
+// SetDNS sets the DNS server (host:port) used by later Ping and Check calls.
+// Desktop clients pass the system resolver: public resolvers may not answer
+// under whitelists or behind another VPN client. Returns 0, or -1 for an
+// invalid address.
+//
+//export SetDNS
+func SetDNS(dnsServer *C.char) C.longlong {
+	if err := defaultRuntime.SetDNS(goString(dnsServer)); err != nil {
+		return errorResult
+	}
+	return 0
+}
+
 func goString(value *C.char) string {
 	if value == nil {
 		return ""
