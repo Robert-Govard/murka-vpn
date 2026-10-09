@@ -1,7 +1,6 @@
 package org.olcbox.app.ui.theme
 
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -18,8 +17,8 @@ actual fun AppTheme(
     useDynamicColor: Boolean,
     content: @Composable () -> Unit
 ) {
-    val systemIsDark = isSystemInDarkTheme()
-    val isDarkState = remember { mutableStateOf(systemIsDark) }
+    // The brand look is the dark neon theme; light stays available via the toggle.
+    val isDarkState = remember { mutableStateOf(true) }
     val typography = getAppTypography()
 
     CompositionLocalProvider(
