@@ -46,13 +46,18 @@ class MacTunControllerTest {
 
     @Test
     fun configPicksUdpModeAndCredentials() {
-        val xray = MacTunController.configContent(10808, "user", "p'w", udpOverTcp = false)
+        val xray = MacTunController.configContent(10808, "user", "p'w", udpOverTcp = false, mapDns = false)
         assertTrue("udp: 'udp'" in xray)
         assertTrue("password: 'p''w'" in xray)
         assertTrue("post-up-script: ${MacTunController.DIR_PLACEHOLDER}/up.sh" in xray)
-        val olcRtc = MacTunController.configContent(10808, "", "", udpOverTcp = true)
+        val olcRtc = MacTunController.configContent(10808, "", "", udpOverTcp = true, mapDns = true)
         assertTrue("udp: 'tcp'" in olcRtc)
         assertFalse("username" in olcRtc)
+        // IPv6 goes into the tunnel too, so it cannot leak around the VPN.
+        assertTrue("ipv6: '${MacTunController.TUN_IPV6_ADDRESS}'" in xray && "ipv6:" in olcRtc)
+        // olcRTC's SOCKS has no UDP: DNS is answered by hev with mapped addresses.
+        assertTrue("mapdns:" in olcRtc && "address: ${MacTunController.MAPDNS_ADDRESS}" in olcRtc)
+        assertFalse("mapdns:" in xray)
     }
 
     @Test
@@ -72,10 +77,11 @@ class MacTunControllerTest {
             config = Path.of("/Users/a b/hev.yml"),
             appPid = 42,
             stopFile = Path.of("/Users/a b/stop"),
-            physical = MacTunController.PhysicalRoute("en0", "192.168.50.1")
+            physical = MacTunController.PhysicalRoute("en0", "192.168.50.1"),
+            dnsServer = "1.1.1.1"
         )
         assertTrue("cp '/Users/a b/helper.sh'" in cmd)
-        assertTrue("'/Users/a b/hev' '/Users/a b/hev.yml' 42 '/Users/a b/stop' 'en0' '192.168.50.1'" in cmd)
+        assertTrue("'/Users/a b/hev' '/Users/a b/hev.yml' 42 '/Users/a b/stop' 'en0' '192.168.50.1' '1.1.1.1'" in cmd)
         assertTrue(cmd.endsWith("& }"))
     }
 
@@ -96,7 +102,8 @@ class MacTunControllerTest {
                 config = dir.resolve("hev.yml"),
                 appPid = ProcessHandle.current().pid(),
                 stopFile = dir.resolve("stop"),
-                physical = MacTunController.PhysicalRoute("en0", "192.168.50.1")
+                physical = MacTunController.PhysicalRoute("en0", "192.168.50.1"),
+                dnsServer = "1.1.1.1"
             )
             // Same AppleScript as production, minus the admin prompt.
             val script = MacTunController.adminAppleScript(command, "test")
@@ -141,28 +148,39 @@ class MacTunControllerTest {
         try {
             val routeLog = dir.resolve("route.log")
             val route = executable(dir.resolve("route"), "#!/bin/sh\necho \"$@\" >> '$routeLog'\n")
+            val nsLog = dir.resolve("networksetup.log")
+            val networksetup = executable(
+                dir.resolve("networksetup"),
+                "#!/bin/sh\necho \"$@\" >> '$nsLog'\ncase \"$1\" in\n" +
+                    "-listnetworkserviceorder) printf '(1) Thunderbolt Bridge\\n(Hardware Port: Thunderbolt Bridge, Device: bridge0)\\n\\n(2) Wi-Fi\\n(Hardware Port: Wi-Fi, Device: en0)\\n';;\n" +
+                    "-getdnsservers) echo \"There aren't any DNS Servers set on Wi-Fi.\";;\nesac\n"
+            )
             // Fake hev: run post-up-script from its config with a utun name, then idle.
             val hev = executable(
                 dir.resolve("hev"),
                 "#!/bin/sh\nup=$(sed -n 's/.*post-up-script: //p' \"$1\")\n\"\$up\" utun99\nexec sleep 60\n"
             )
             val config = dir.resolve("hev.yml")
-            Files.writeString(config, MacTunController.configContent(10808, "", "", udpOverTcp = false))
+            Files.writeString(config, MacTunController.configContent(10808, "", "", udpOverTcp = false, mapDns = false))
             val paths = MacTunController.HelperPaths(
                 pid = dir.resolve("pid").toString(),
                 ifName = dir.resolve("ifname").toString(),
                 log = dir.resolve("hev.log").toString(),
                 route = route.toString(),
-                tmpDir = dir.toString()
+                tmpDir = dir.toString(),
+                networksetup = networksetup.toString(),
+                dnsBackup = dir.resolve("dns.backup").toString(),
+                flushDns = "true"
             )
             val helper = executable(dir.resolve("helper.sh"), MacTunController.helperScript(paths))
             val stopFile = dir.resolve("stop")
             val process = ProcessBuilder(
                 "/bin/sh", helper.toString(), hev.toString(), config.toString(),
-                ProcessHandle.current().pid().toString(), stopFile.toString(), "en0", "192.168.50.1"
+                ProcessHandle.current().pid().toString(), stopFile.toString(), "en0", "192.168.50.1", "1.1.1.1"
             ).redirectErrorStream(true).start()
 
             waitUntil { Files.exists(Path.of(paths.ifName)) }
+            waitUntil { Files.exists(nsLog) && "-setdnsservers Wi-Fi 1.1.1.1" in Files.readString(nsLog) }
             assertEquals("utun99", Files.readString(Path.of(paths.ifName)).trim())
             assertEquals(
                 listOf(
@@ -170,7 +188,9 @@ class MacTunControllerTest {
                     // "network is unreachable" once the utun holds 0/1 + 128/1.
                     "-q -n add -ifscope en0 default 192.168.50.1",
                     "-q -n add -inet 0.0.0.0/1 -interface utun99",
-                    "-q -n add -inet 128.0.0.0/1 -interface utun99"
+                    "-q -n add -inet 128.0.0.0/1 -interface utun99",
+                    "-q -n add -inet6 ::/1 -interface utun99",
+                    "-q -n add -inet6 8000::/1 -interface utun99"
                 ),
                 Files.readAllLines(routeLog)
             )
@@ -178,6 +198,9 @@ class MacTunControllerTest {
             Files.writeString(stopFile, "")
             assertTrue(process.waitFor(10, TimeUnit.SECONDS), "helper did not exit on stop file")
             assertEquals("-q -n delete -ifscope en0 default", Files.readAllLines(routeLog).last())
+            // The previous DNS (none set: DHCP) is restored and the backup removed.
+            assertEquals("-setdnsservers Wi-Fi Empty", Files.readAllLines(nsLog).last())
+            assertFalse(Files.exists(dir.resolve("dns.backup")))
             assertFalse(Files.exists(Path.of(paths.ifName)))
             assertFalse(Files.exists(Path.of(paths.pid)))
             assertTrue(Files.list(dir).use { s -> s.noneMatch { it.fileName.toString().startsWith("murka-tun.") } })
@@ -205,7 +228,7 @@ class MacTunControllerTest {
                 "#!/bin/sh\nup=$(sed -n 's/.*post-up-script: //p' \"$1\")\n\"\$up\" utun99\nexec sleep 60\n"
             )
             val config = dir.resolve("hev.yml")
-            Files.writeString(config, MacTunController.configContent(10808, "", "", udpOverTcp = false))
+            Files.writeString(config, MacTunController.configContent(10808, "", "", udpOverTcp = false, mapDns = false))
             val paths = MacTunController.HelperPaths(
                 pid = dir.resolve("pid").toString(), ifName = dir.resolve("ifname").toString(),
                 log = dir.resolve("hev.log").toString(), route = route.toString(), tmpDir = dir.toString()

@@ -123,3 +123,34 @@ class XrayConfigTest {
         assertEquals("Xray" to "", XrayConfig.summary("not json"))
     }
 }
+
+class XrayPinServersTest {
+    private val raw = """
+        {"outbounds":[
+          {"tag":"proxy","protocol":"vless","settings":{"vnext":[{"address":"node.example.org","port":443,"users":[{"id":"u"}]}]},
+           "streamSettings":{"security":"reality","realitySettings":{"serverName":"cover.example.com"}}},
+          {"tag":"tro","protocol":"trojan","settings":{"servers":[{"address":"tro.example.org","port":443,"password":"p"}]},
+           "streamSettings":{"security":"tls","tlsSettings":{}}},
+          {"tag":"ip","protocol":"vless","settings":{"vnext":[{"address":"203.0.113.9","port":443,"users":[{"id":"u"}]}]}},
+          {"tag":"direct","protocol":"freedom"}
+        ]}
+    """.trimIndent()
+
+    @Test
+    fun serverDomainsBecomeIpsAndTlsKeepsTheName() {
+        val resolved = mapOf("node.example.org" to "198.51.100.1", "tro.example.org" to "198.51.100.2")
+        val out = kotlinx.serialization.json.Json.parseToJsonElement(XrayConfig.pinServerAddresses(raw) { resolved[it] }).toString()
+        assertTrue("\"address\":\"198.51.100.1\"" in out, out)
+        assertTrue("\"address\":\"198.51.100.2\"" in out, out)
+        // Reality already names its cover site; TLS gets the original domain as SNI.
+        assertTrue("\"serverName\":\"cover.example.com\"" in out, out)
+        assertTrue("\"tlsSettings\":{\"serverName\":\"tro.example.org\"}" in out, out)
+        assertTrue("\"address\":\"203.0.113.9\"" in out, out)
+    }
+
+    @Test
+    fun unresolvedDomainsStayAsTheyAre() {
+        val out = XrayConfig.pinServerAddresses(raw) { null }
+        assertTrue("node.example.org" in out && "tro.example.org" in out)
+    }
+}

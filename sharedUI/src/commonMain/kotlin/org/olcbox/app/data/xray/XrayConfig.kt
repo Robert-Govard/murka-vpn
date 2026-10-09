@@ -133,6 +133,50 @@ object XrayConfig {
         protocol to listOfNotNull(network, security).joinToString(" · ")
     }.getOrDefault("Xray" to "")
 
+    /**
+     * Replaces server domains in proxy outbounds with IPs from [resolve] (called before a
+     * desktop TUN takes over DNS, so Xray never has to resolve its own server through the
+     * tunnel). TLS keeps the original name as SNI; Reality already names its cover site.
+     */
+    fun pinServerAddresses(raw: String, resolve: (String) -> String?): String {
+        val root = json.parseToJsonElement(raw).jsonObject
+        val outbounds = root["outbounds"] as? JsonArray ?: return raw
+        val out = root.toMutableMap()
+        out["outbounds"] = JsonArray(outbounds.map { pinOutbound(it, resolve) })
+        return JsonObject(out).toString()
+    }
+
+    private fun pinOutbound(element: JsonElement, resolve: (String) -> String?): JsonElement {
+        val outbound = element as? JsonObject ?: return element
+        val settings = outbound["settings"] as? JsonObject ?: return element
+        var pinnedName: String? = null
+        val newSettings = settings.toMutableMap()
+        for (key in listOf("vnext", "servers")) {
+            val servers = settings[key] as? JsonArray ?: continue
+            newSettings[key] = JsonArray(servers.map { server ->
+                val obj = server as? JsonObject ?: return@map server
+                val address = obj.string("address") ?: return@map server
+                if (isIpLiteral(address)) return@map server
+                val ip = resolve(address) ?: return@map server
+                pinnedName = pinnedName ?: address
+                JsonObject(obj.toMutableMap().apply { put("address", JsonPrimitive(ip)) })
+            })
+        }
+        val result = outbound.toMutableMap()
+        result["settings"] = JsonObject(newSettings)
+        val name = pinnedName
+        val stream = outbound["streamSettings"] as? JsonObject
+        val tls = stream?.get("tlsSettings") as? JsonObject
+        if (name != null && stream != null && stream.string("security") == "tls" && tls?.string("serverName").isNullOrBlank()) {
+            val newTls = (tls ?: JsonObject(emptyMap())).toMutableMap().apply { put("serverName", JsonPrimitive(name)) }
+            result["streamSettings"] = JsonObject(stream.toMutableMap().apply { put("tlsSettings", JsonObject(newTls)) })
+        }
+        return JsonObject(result)
+    }
+
+    private fun isIpLiteral(address: String): Boolean =
+        address.contains(':') || Regex("""^\d{1,3}(\.\d{1,3}){3}$""").matches(address)
+
     private fun JsonElement.withInterface(name: String): JsonElement {
         val outbound = this as? JsonObject ?: return this
         val stream = (outbound["streamSettings"] as? JsonObject).orEmpty().toMutableMap()

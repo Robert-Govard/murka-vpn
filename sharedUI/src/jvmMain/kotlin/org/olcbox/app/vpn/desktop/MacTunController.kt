@@ -28,14 +28,16 @@ internal class MacTunController(
         socksUsername: String,
         socksPassword: String,
         udpOverTcp: Boolean,
-        physical: PhysicalRoute
+        physical: PhysicalRoute,
+        dnsServer: String,
+        mapDns: Boolean
     ): Process {
         val dir = DesktopPaths.appDataDir().resolve("mac-tun")
         Files.createDirectories(dir)
         val stopFile = dir.resolve(STOP_FILE_NAME)
         Files.deleteIfExists(stopFile)
         val config = dir.resolve("hev.yml")
-        Files.writeString(config, configContent(socksPort, socksUsername, socksPassword, udpOverTcp))
+        Files.writeString(config, configContent(socksPort, socksUsername, socksPassword, udpOverTcp, mapDns))
         val helper = dir.resolve("helper.sh")
         Files.writeString(helper, helperScript())
         val startedAt = System.currentTimeMillis()
@@ -47,7 +49,8 @@ internal class MacTunController(
                 config = config,
                 appPid = ProcessHandle.current().pid(),
                 stopFile = stopFile,
-                physical = physical
+                physical = physical,
+                dnsServer = dnsServer
             )
         )
 
@@ -154,7 +157,11 @@ internal class MacTunController(
         val ifName: String = IFNAME_PATH,
         val log: String = LOG_PATH,
         val route: String = "/sbin/route",
-        val tmpDir: String = "/tmp"
+        val tmpDir: String = "/tmp",
+        val networksetup: String = "/usr/sbin/networksetup",
+        // Root-owned and persistent, so a power cut mid-session is undone on the next start.
+        val dnsBackup: String = DNS_BACKUP_PATH,
+        val flushDns: String = "dscacheutil -flushcache; killall -HUP mDNSResponder"
     )
 
     internal data class PhysicalRoute(val interfaceName: String, val gateway: String)
@@ -162,6 +169,12 @@ internal class MacTunController(
     internal companion object {
         const val TUN_MTU = 1500
         const val TUN_IPV4_ADDRESS = "10.0.88.88"
+        const val TUN_IPV6_ADDRESS = "fd8a:88::88"
+        /** hev answers DNS here in olcRTC mode (its SOCKS has no UDP); routed into the utun. */
+        const val MAPDNS_ADDRESS = "10.0.88.53"
+        /** DNS for Xray mode; queries travel through the tunnel like any other traffic. */
+        const val XRAY_DNS_SERVER = "1.1.1.1"
+        const val DNS_BACKUP_PATH = "/var/db/murka-tun.dns"
         const val STOP_FILE_NAME = "stop"
         const val IFNAME_PATH = "/var/run/murka-tun.ifname"
         const val PID_PATH = "/var/run/murka-tun.pid"
@@ -197,12 +210,14 @@ internal class MacTunController(
             socksPort: Int,
             socksUsername: String,
             socksPassword: String,
-            udpOverTcp: Boolean
+            udpOverTcp: Boolean,
+            mapDns: Boolean
         ): String = buildString {
             appendLine("tunnel:")
             appendLine("  name: utun")
             appendLine("  mtu: $TUN_MTU")
             appendLine("  ipv4: $TUN_IPV4_ADDRESS")
+            appendLine("  ipv6: '$TUN_IPV6_ADDRESS'")
             appendLine("  post-up-script: $DIR_PLACEHOLDER/up.sh")
             appendLine()
             appendLine("socks5:")
@@ -213,6 +228,15 @@ internal class MacTunController(
             if (socksUsername.isNotBlank() && socksPassword.isNotBlank()) {
                 appendLine("  username: '${socksUsername.replace("'", "''")}'")
                 appendLine("  password: '${socksPassword.replace("'", "''")}'")
+            }
+            if (mapDns) {
+                appendLine()
+                appendLine("mapdns:")
+                appendLine("  address: $MAPDNS_ADDRESS")
+                appendLine("  port: 53")
+                appendLine("  network: 100.64.0.0")
+                appendLine("  netmask: 255.192.0.0")
+                appendLine("  cache-size: 10000")
             }
             appendLine()
             appendLine("misc:")
@@ -226,12 +250,26 @@ internal class MacTunController(
             appendLine("  log-level: warn")
         }.trimEnd()
 
-        /** Runs as root. Args: hev binary, hev config, app pid, stop file, physical interface, its gateway. */
+        /**
+         * Runs as root. Args: hev binary, hev config, app pid, stop file, physical interface,
+         * its gateway, and the DNS server to use while the tunnel is up (empty: leave DNS alone).
+         */
         fun helperScript(paths: HelperPaths = HelperPaths()): String = """
             #!/bin/sh
-            hev_src="${'$'}1"; conf_src="${'$'}2"; app_pid="${'$'}3"; stop_file="${'$'}4"; phys_if="${'$'}5"; phys_gw="${'$'}6"
+            hev_src="${'$'}1"; conf_src="${'$'}2"; app_pid="${'$'}3"; stop_file="${'$'}4"; phys_if="${'$'}5"; phys_gw="${'$'}6"; dns_server="${'$'}7"
             echo "${'$'}phys_if" | grep -Eq '^[a-z]+[0-9]+${'$'}' || exit 2
             echo "${'$'}phys_gw" | grep -Eq '^[0-9]{1,3}([.][0-9]{1,3}){3}${'$'}' || exit 2
+            [ -z "${'$'}dns_server" ] || echo "${'$'}dns_server" | grep -Eq '^[0-9]{1,3}([.][0-9]{1,3}){3}${'$'}' || exit 2
+            # DNS of the network service behind phys_if is saved and put back on stop.
+            restore_dns() {
+              [ -f ${paths.dnsBackup} ] || return 0
+              svc=${'$'}(head -n 1 ${paths.dnsBackup})
+              servers=${'$'}(tail -n +2 ${paths.dnsBackup} | tr '\n' ' ')
+              ${paths.networksetup} -setdnsservers "${'$'}svc" ${'$'}servers
+              rm -f ${paths.dnsBackup}
+              ${paths.flushDns} 2>/dev/null
+            }
+            restore_dns # left over from a session that never ended (power cut)
             # A previous tunnel (reconnect, crashed app): stop its hev and let its helper clean up.
             if [ -f ${paths.pid} ]; then kill "${'$'}(cat ${paths.pid})" 2>/dev/null; sleep 2; fi
             rm -f ${paths.ifName}
@@ -242,6 +280,8 @@ internal class MacTunController(
             #!/bin/sh
             ${paths.route} -q -n add -inet 0.0.0.0/1 -interface "${'$'}1"
             ${paths.route} -q -n add -inet 128.0.0.0/1 -interface "${'$'}1"
+            ${paths.route} -q -n add -inet6 ::/1 -interface "${'$'}1"
+            ${paths.route} -q -n add -inet6 8000::/1 -interface "${'$'}1"
             echo "${'$'}1" > ${paths.ifName}
             UP
             chmod 700 "${'$'}dir/hev" "${'$'}dir/up.sh"
@@ -256,6 +296,18 @@ internal class MacTunController(
             hev_pid=${'$'}!
             echo "${'$'}hev_pid" > ${paths.pid}
             chmod 644 ${paths.log}
+            if [ -n "${'$'}dns_server" ]; then
+              svc=${'$'}(${paths.networksetup} -listnetworkserviceorder | awk -v dev="${'$'}phys_if" '
+                /^\([0-9*]+\) / { name = ${'$'}0; sub(/^\([0-9*]+\) /, "", name) }
+                index(${'$'}0, "Device: " dev ")") { print name; exit }')
+              if [ -n "${'$'}svc" ]; then
+                old=${'$'}(${paths.networksetup} -getdnsservers "${'$'}svc")
+                case "${'$'}old" in *"aren't any"*) old=Empty ;; esac
+                printf '%s\n%s\n' "${'$'}svc" "${'$'}old" > ${paths.dnsBackup}
+                ${paths.networksetup} -setdnsservers "${'$'}svc" "${'$'}dns_server"
+                ${paths.flushDns} 2>/dev/null
+              fi
+            fi
             while kill -0 "${'$'}app_pid" 2>/dev/null && kill -0 "${'$'}hev_pid" 2>/dev/null && [ ! -e "${'$'}stop_file" ]; do
               sleep 1
             done
@@ -263,6 +315,7 @@ internal class MacTunController(
             for _ in 1 2 3; do kill -0 "${'$'}hev_pid" 2>/dev/null || break; sleep 1; done
             kill -9 "${'$'}hev_pid" 2>/dev/null
             if [ "${'$'}added_scope" = 1 ]; then ${paths.route} -q -n delete -ifscope "${'$'}phys_if" default; fi
+            restore_dns
             rm -rf "${'$'}dir"
             if [ "${'$'}(cat ${paths.pid} 2>/dev/null)" = "${'$'}hev_pid" ]; then rm -f ${paths.ifName} ${paths.pid}; fi
         """.trimIndent() + "\n"
@@ -278,10 +331,11 @@ internal class MacTunController(
             config: Path,
             appPid: Long,
             stopFile: Path,
-            physical: PhysicalRoute
+            physical: PhysicalRoute,
+            dnsServer: String
         ): String {
             val args = listOf(hevBinary, config).joinToString(" ") { shellQuote(it.toString()) } +
-                " $appPid " + listOf(stopFile.toString(), physical.interfaceName, physical.gateway)
+                " $appPid " + listOf(stopFile.toString(), physical.interfaceName, physical.gateway, dnsServer)
                     .joinToString(" ") { shellQuote(it) }
             return "d=\$(mktemp -d /tmp/murka-helper.XXXXXX) && cp ${shellQuote(helper.toString())} \"\$d/h.sh\" && " +
                 "chmod 700 \"\$d/h.sh\" && { (/bin/sh \"\$d/h.sh\" $args; rm -rf \"\$d\") < /dev/null > /dev/null 2>&1 & }"
