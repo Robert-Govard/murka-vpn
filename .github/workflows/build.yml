@@ -239,3 +239,74 @@ jobs:
             for f in olcbox/dist/*; do cp "$f" "stable-names/$(basename "$f" | sed "s/-${VERSION}-/-/")"; done
             GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" stable-names/* --clobber -R "$PUBLIC_REPO"
           fi
+
+  # Unsigned IPA for sideloading (Sideloadly/AltStore re-sign it with the user's Apple ID).
+  # Without an Apple Developer account there is no Network Extension: the iOS app runs
+  # olcRTC emergency rooms as a local SOCKS proxy only.
+  ios:
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: olcrtc/go.mod
+          cache-dependency-path: olcrtc/go.sum
+      - uses: gradle/actions/setup-gradle@v4
+      - name: gomobile
+        working-directory: olcrtc
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+      - name: Build unsigned iOS app
+        working-directory: olcbox
+        env:
+          OLCRTC_REPO: ${{ github.workspace }}/olcrtc
+          OLCBOX_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          xcodebuild \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build/ios-ipa/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="${VERSION}" \
+            CURRENT_PROJECT_VERSION="${{ needs.version.outputs.code }}"
+      - name: Package IPA
+        working-directory: olcbox
+        run: |
+          app="build/ios-ipa/DerivedData/Build/Products/Release-iphoneos/iosApp.app"
+          test -d "$app"
+          rm -rf build/ios-ipa/package dist
+          mkdir -p build/ios-ipa/package/Payload dist
+          cp -R "$app" build/ios-ipa/package/Payload/
+          (cd build/ios-ipa/package && /usr/bin/zip -qry "${GITHUB_WORKSPACE}/olcbox/dist/MurkaVPN-${VERSION}-ios-unsigned.ipa" Payload)
+          unzip -t "dist/MurkaVPN-${VERSION}-ios-unsigned.ipa" > /dev/null
+          ls -la dist
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: gh release upload "$TAG" olcbox/dist/* --clobber -R "$GITHUB_REPOSITORY"
+      - name: Publish to public repo
+        shell: bash
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          if [ -z "$RELEASES_TOKEN" ]; then echo "RELEASES_TOKEN not set, skipping $PUBLIC_REPO"; exit 0; fi
+          GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" olcbox/dist/* --clobber -R "$PUBLIC_REPO"
+          if [ "$TAG" != nightly ]; then
+            mkdir -p stable-names
+            for f in olcbox/dist/*; do cp "$f" "stable-names/$(basename "$f" | sed "s/-${VERSION}-/-/")"; done
+            GH_TOKEN="$RELEASES_TOKEN" gh release upload "$TAG" stable-names/* --clobber -R "$PUBLIC_REPO"
+          fi
