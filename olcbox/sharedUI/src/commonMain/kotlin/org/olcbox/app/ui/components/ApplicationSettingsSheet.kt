@@ -979,7 +979,11 @@ private fun SharedLogsSettingsContent(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
+
+        TelemetryControls()
+
+        Spacer(Modifier.height(12.dp))
 
         Surface(
             modifier = Modifier
