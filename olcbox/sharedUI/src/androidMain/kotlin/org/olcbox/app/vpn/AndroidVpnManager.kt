@@ -47,7 +47,7 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
     private val _connectionMode = MutableStateFlow(AndroidConnectionMode.Tun)
     private val _proxySettings = MutableStateFlow(AndroidSocksProxySettings())
     private val _splitTunnelSettings = MutableStateFlow(AndroidSplitTunnelSettings())
-    private val _dynamicThemeEnabled = MutableStateFlow(true)
+    private val _dynamicThemeEnabled = MutableStateFlow(false)
     private val _installedApps = MutableStateFlow<List<AndroidInstalledApp>>(emptyList())
     private val deviceIdentityProvider = PersistentDeviceIdentityProvider(
         LocationsDataSourceImpl(appContext)
@@ -89,7 +89,7 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
                         mode = mode,
                         proxy = proxy,
                         splitTunnel = splitTunnel,
-                        dynamicThemeEnabled = preferences[KEY_ANDROID_DYNAMIC_THEME] != false
+                        dynamicThemeEnabled = preferences[KEY_ANDROID_DYNAMIC_THEME] == true
                     )
                 }
                 .collect { settings ->

@@ -10,7 +10,8 @@ internal val LocalThemeIsDark = compositionLocalOf { mutableStateOf(true) }
 fun AppTheme(
     content: @Composable () -> Unit
 ) {
-    AppTheme(useDynamicColor = true, content = content)
+    // Brand colours everywhere; no Android wallpaper colours.
+    AppTheme(useDynamicColor = false, content = content)
 }
 
 @Composable
