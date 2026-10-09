@@ -501,8 +501,9 @@ class LocationViewModel(
         const val LOCATION_PING_ATTEMPTS = 1
         const val LOCATION_PING_TIMEOUT_MS = 12_000L
         const val LOCATION_PING_RETRY_DELAY_MS = 0L
-        // Finish each location check before starting the next one.
-        const val LOCATION_PING_PARALLELISM = 1
+        // Ping every location at once; each check has its own core, port and timeout.
+        // The cap only keeps a very long list from spawning dozens of cores.
+        const val LOCATION_PING_PARALLELISM = 16
     }
 
     private data class ProviderDraft(
