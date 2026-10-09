@@ -1,5 +1,7 @@
 package org.olcbox.app.vpn
 
+import java.net.Inet4Address
+import java.net.InetAddress
 import org.olcbox.app.data.xray.XrayConfig
 import org.olcbox.app.vpn.desktop.XrayProcess
 import kotlinx.coroutines.CompletableDeferred
@@ -231,7 +233,8 @@ class DesktopVpnManager private constructor(
                     ready = ready,
                     startupFailure = startupFailure,
                     bindInterface = bindInterface,
-                    privileged = desktopMode == DesktopMode.LinuxTun
+                    privileged = desktopMode == DesktopMode.LinuxTun,
+                    pinServers = desktopMode == DesktopMode.MacTun
                 )
             } else {
                 startOlcRtcProcessWithFallback(
@@ -341,7 +344,10 @@ class DesktopVpnManager private constructor(
             socksUsername = socksSettings.username,
             socksPassword = socksSettings.password,
             udpOverTcp = !isXray,
-            physical = physical
+            physical = physical,
+            // Xray carries DNS over UDP; olcRTC's SOCKS has no UDP, so hev answers DNS itself.
+            dnsServer = if (isXray) MacTunController.XRAY_DNS_SERVER else MacTunController.MAPDNS_ADDRESS,
+            mapDns = !isXray
         )
 
         if (requestGeneration != generation) {
@@ -606,12 +612,22 @@ class DesktopVpnManager private constructor(
         ready: CompletableDeferred<Unit>,
         startupFailure: CompletableDeferred<String>,
         bindInterface: String?,
-        privileged: Boolean
+        privileged: Boolean,
+        pinServers: Boolean = false
     ): Process {
         val binary = DesktopNativeAssets.resolveXrayBinary()
         val assetsDir = DesktopNativeAssets.resolveXrayAssetsDir()
+        // The macOS TUN sends system DNS through the tunnel; resolve the servers first so
+        // Xray never needs the tunnel to find its own server.
+        val raw = if (pinServers) {
+            XrayConfig.pinServerAddresses(location.xrayConfig) { host ->
+                runCatching { InetAddress.getAllByName(host).firstOrNull { it is Inet4Address }?.hostAddress }.getOrNull()
+            }
+        } else {
+            location.xrayConfig
+        }
         val prepared = XrayConfig.prepare(
-            raw = location.xrayConfig,
+            raw = raw,
             socksHost = socksSettings.host,
             socksPort = socksSettings.port,
             username = socksSettings.username,
