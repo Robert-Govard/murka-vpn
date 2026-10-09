@@ -890,7 +890,6 @@ class DesktopVpnManager private constructor(
         const val TCP_CONNECT_TIMEOUT_MS = 250L
         const val PROCESS_STOP_TIMEOUT_MS = 3_000L
         const val PROCESS_KILL_TIMEOUT_MS = 1_000L
-        const val DEFAULT_LOCATION_PING_PARALLELISM = 4
 
         internal fun isFatalOlcRtcStartupLine(line: String): Boolean {
             val text = line.lowercase()

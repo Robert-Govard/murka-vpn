@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.olcbox.app.data.model.LocationConfig
@@ -389,7 +388,6 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
         const val MAX_SOCKS_PASSWORD_LENGTH = 64
         const val PROXY_USERNAME_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
         const val PROXY_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-        const val DEFAULT_LOCATION_PING_PARALLELISM = 4
         val random = SecureRandom()
     }
 }
