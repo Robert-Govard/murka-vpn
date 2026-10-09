@@ -1,5 +1,6 @@
 package org.olcbox.app.vpn.service
 
+import org.olcbox.app.vpn.RussianApps
 import xraymobile.Xraymobile
 import org.olcbox.app.data.model.LocationEntry
 import org.olcbox.app.vpn.failover.Socks5HttpProbe
@@ -346,6 +347,10 @@ class OlcboxVpnService : VpnService() {
         } else {
             preferences?.get(KEY_ANDROID_SOCKS_PORT)
         }
+        val storedSplit = RussianApps.resolveSplitTunnel(
+            preferences?.get(KEY_ANDROID_SPLIT_TUNNEL_MODE),
+            preferences?.get(KEY_ANDROID_SPLIT_TUNNEL_BYPASS_APPS)
+        )
 
         return StartOptions(
             connectionMode = AndroidConnectionMode.fromValue(
@@ -366,15 +371,14 @@ class OlcboxVpnService : VpnService() {
                     ?: preferences?.get(KEY_ANDROID_SOCKS_PASSWORD)
                 ).orEmpty(),
             splitTunnelMode = AndroidSplitTunnelMode.fromValue(
-                intent.getStringExtra(OlcboxVpnActions.EXTRA_SPLIT_TUNNEL_MODE)
-                    ?: preferences?.get(KEY_ANDROID_SPLIT_TUNNEL_MODE)
+                intent.getStringExtra(OlcboxVpnActions.EXTRA_SPLIT_TUNNEL_MODE) ?: storedSplit.first
             ),
             splitTunnelProxyApps = intent.stringCollectionExtra(
                 OlcboxVpnActions.EXTRA_SPLIT_TUNNEL_PROXY_APPS
             ) ?: preferences?.get(KEY_ANDROID_SPLIT_TUNNEL_PROXY_APPS).orEmpty(),
             splitTunnelBypassApps = intent.stringCollectionExtra(
                 OlcboxVpnActions.EXTRA_SPLIT_TUNNEL_BYPASS_APPS
-            ) ?: preferences?.get(KEY_ANDROID_SPLIT_TUNNEL_BYPASS_APPS).orEmpty()
+            ) ?: storedSplit.second
         )
     }
 

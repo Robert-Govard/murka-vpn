@@ -1,5 +1,6 @@
 package org.olcbox.app.ui.activities
 
+import org.olcbox.app.vpn.RussianApps
 import org.olcbox.app.ui.components.TelemetryControls
 import org.olcbox.app.util.ruPlural
 import android.graphics.Bitmap
@@ -2997,4 +2998,4 @@ private val RUSSIAN_BYPASS_PACKAGE_NAMES = setOf(
     "ru.avito",
     "ru.vtb24.mobilebanking.android",
     "ru.tinkoff.mb"
-)
+) + RussianApps.packages

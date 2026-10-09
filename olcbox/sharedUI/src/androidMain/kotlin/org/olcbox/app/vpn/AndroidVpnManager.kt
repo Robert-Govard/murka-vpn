@@ -77,12 +77,14 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
                         username = preferences[KEY_ANDROID_SOCKS_USERNAME].orEmpty(),
                         password = preferences[KEY_ANDROID_SOCKS_PASSWORD].orEmpty()
                     )
+                    val (splitMode, bypassPackages) = RussianApps.resolveSplitTunnel(
+                        preferences[KEY_ANDROID_SPLIT_TUNNEL_MODE],
+                        preferences[KEY_ANDROID_SPLIT_TUNNEL_BYPASS_APPS]
+                    )
                     val splitTunnel = AndroidSplitTunnelSettings(
-                        mode = AndroidSplitTunnelMode.fromValue(
-                            preferences[KEY_ANDROID_SPLIT_TUNNEL_MODE]
-                        ),
+                        mode = AndroidSplitTunnelMode.fromValue(splitMode),
                         proxyPackages = preferences[KEY_ANDROID_SPLIT_TUNNEL_PROXY_APPS].orEmpty(),
-                        bypassPackages = preferences[KEY_ANDROID_SPLIT_TUNNEL_BYPASS_APPS].orEmpty()
+                        bypassPackages = bypassPackages
                     )
                     AndroidAppPreferences(
                         mode = mode,
