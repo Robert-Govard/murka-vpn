@@ -1,5 +1,10 @@
 package org.olcbox.app
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.lifecycleScope
+import org.olcbox.app.telemetry.FileTelemetryStore
+import org.olcbox.app.telemetry.createTelemetry
+import org.olcbox.app.ui.components.LocalTelemetry
 import android.Manifest
 import android.content.Intent
 import android.os.Build
@@ -53,6 +58,15 @@ class AppActivity : ComponentActivity() {
             null
         }
 
+        val telemetry = createTelemetry(
+            store = FileTelemetryStore(filesDir),
+            identity = PersistentDeviceIdentityProvider(locationsDataSource),
+            locationsRepository = locationsRepository,
+            vpnManager = vpnManager,
+            osVersion = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}"
+        )
+        if (savedInstanceState == null) telemetry.start(lifecycleScope, vpnManager.status)
+
         val viewModel = HomeScreenViewModel(
             vpnManager = vpnManager,
             locationsRepository = locationsRepository,
@@ -70,12 +84,14 @@ class AppActivity : ComponentActivity() {
             val dynamicThemeEnabled by vpnManager.dynamicThemeEnabled.collectAsState()
 
             AppTheme(useDynamicColor = dynamicThemeEnabled) {
-                AndroidMainScreen(
-                    viewModel = viewModel,
-                    locationViewModel = locationViewModel,
-                    vpnManager = vpnManager,
-                    appUpdateService = updateService
-                )
+                CompositionLocalProvider(LocalTelemetry provides telemetry) {
+                    AndroidMainScreen(
+                        viewModel = viewModel,
+                        locationViewModel = locationViewModel,
+                        vpnManager = vpnManager,
+                        appUpdateService = updateService
+                    )
+                }
             }
         }
     }

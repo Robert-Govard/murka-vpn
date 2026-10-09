@@ -1,5 +1,10 @@
 package org.olcbox.app.ios
 
+import platform.UIKit.UIDevice
+import org.olcbox.app.ui.components.LocalTelemetry
+import org.olcbox.app.telemetry.createTelemetry
+import org.olcbox.app.telemetry.IosTelemetryStore
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -98,6 +103,13 @@ private class IosAppDependencies(
         logExporter = IosLogExporter(platformBridge)
     )
     val locationViewModel = LocationViewModel(locationsRepository)
+    val telemetry = createTelemetry(
+        store = IosTelemetryStore(),
+        identity = PersistentDeviceIdentityProvider(locationsDataSource),
+        locationsRepository = locationsRepository,
+        vpnManager = vpnManager,
+        osVersion = "${UIDevice.currentDevice.systemName} ${UIDevice.currentDevice.systemVersion} ${UIDevice.currentDevice.model}"
+    )
 
     fun close() {
         vpnManager.close()
@@ -190,7 +202,12 @@ private fun IosApp(
         checkUpdate(manual = false)
     }
 
+    LaunchedEffect(Unit) {
+        dependencies.telemetry.start(this, dependencies.vpnManager.status)
+    }
+
     AppTheme {
+        CompositionLocalProvider(LocalTelemetry provides dependencies.telemetry) {
         val logs by dependencies.homeViewModel.logs.collectAsState()
         val homeState by dependencies.homeViewModel.state.collectAsState()
         val socksProxySettings by dependencies.vpnManager.socksProxySettings.collectAsState()
@@ -375,6 +392,7 @@ private fun IosApp(
                 )
             }
         }
+    }
     }
 }
 

@@ -1,4 +1,9 @@
 import androidx.compose.animation.AnimatedVisibility
+import org.olcbox.app.ui.components.LocalTelemetry
+import org.olcbox.app.telemetry.createTelemetry
+import org.olcbox.app.telemetry.desktopTelemetryStore
+import org.olcbox.app.telemetry.installDesktopCrashRecorder
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -125,6 +130,14 @@ private class DesktopAppDependencies {
 
     val vpnManager = DesktopVpnManager(locationsRepository)
 
+    val telemetry = createTelemetry(
+        store = desktopTelemetryStore(),
+        identity = PersistentDeviceIdentityProvider(locationsDataSource),
+        locationsRepository = locationsRepository,
+        vpnManager = vpnManager,
+        osVersion = "${System.getProperty("os.name")} ${System.getProperty("os.version")} ${System.getProperty("os.arch")}"
+    )
+
     val homeViewModel = HomeScreenViewModel(
         vpnManager = vpnManager,
         locationsRepository = locationsRepository,
@@ -142,6 +155,7 @@ private class DesktopAppDependencies {
 private const val WINDOWS_ELEVATED_START_ARGUMENT = "--olcbox-start-vpn-after-elevation"
 
 fun main(args: Array<String>) {
+    installDesktopCrashRecorder()
     val launchArgs = if (args.any { it.startsWith("olcbox:", ignoreCase = true) }) {
         args.filterNot { it == WINDOWS_ELEVATED_START_ARGUMENT }.toTypedArray()
     } else args
@@ -330,7 +344,12 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
             }
         }
 
+        LaunchedEffect(Unit) {
+            dependencies.telemetry.start(this, dependencies.vpnManager.status)
+        }
+
         AppTheme {
+            CompositionLocalProvider(LocalTelemetry provides dependencies.telemetry) {
             val logs by dependencies.homeViewModel.logs.collectAsState()
             val homeState by dependencies.homeViewModel.state.collectAsState()
             val socksProxySettings by dependencies.vpnManager.socksProxySettings.collectAsState()
@@ -572,6 +591,7 @@ private fun runDesktopApp(args: Array<String>, deepLinks: DesktopDeepLinks) = ap
                     )
                 }
             }
+        }
         }
     }
 }
