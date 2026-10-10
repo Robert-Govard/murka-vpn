@@ -1,6 +1,7 @@
-# End-to-end check of a published Windows build on a real Windows machine:
-# the app starts in its default mode (system VPN: wintun + tun2socks + Xray)
-# against a throwaway Xray server on the same runner, so no real keys are used.
+# End-to-end check of a published Windows build on a real Windows machine: the app
+# starts in its default mode (system VPN: wintun + tun2socks + Xray) against a
+# throwaway Xray server on a separate Linux runner, published through a Cloudflare
+# quick tunnel. Keys are random per run; no real subscription is used.
 name: Windows end-to-end
 
 on:
@@ -14,14 +15,73 @@ on:
         default: '3'
 
 permissions:
-  contents: read
+  contents: write   # the server job hands its endpoint over through a temporary release
+  actions: read
 
 env:
   RELEASES_REPO: Robert-Govard/murka-vpn-releases
   WORK: C:\murka-e2e
-  SERVER_PORT: '10443'
+  ENDPOINT_TAG: e2e-${{ github.run_id }}
 
 jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Start Xray behind a Cloudflare quick tunnel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/srv && cd ~/srv
+          curl -sSL -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip -q xray.zip xray
+          curl -sSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x xray cloudflared
+          uuid=$(cat /proc/sys/kernel/random/uuid)
+          cat > server.json <<EOF
+          {"log":{"access":"$HOME/srv/access.log","loglevel":"warning"},
+           "inbounds":[{"listen":"127.0.0.1","port":8080,"protocol":"vless",
+             "settings":{"clients":[{"id":"$uuid"}],"decryption":"none"},
+             "streamSettings":{"network":"ws","wsSettings":{"path":"/murka"}}}],
+           "outbounds":[{"protocol":"freedom"}]}
+          EOF
+          nohup ./xray run -c server.json > xray.out 2>&1 &
+          nohup ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080 > cf.log 2>&1 &
+          host=""
+          for i in $(seq 1 60); do
+            host=$(grep -oE '[a-z0-9-]+\.trycloudflare\.com' cf.log | head -1 || true)
+            [ -n "$host" ] && break; sleep 2
+          done
+          [ -n "$host" ] || { cat cf.log; exit 1; }
+          # Wait until the tunnel answers before handing it over.
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://$host/murka" || true)
+            [ "$code" != "000" ] && [ "$code" != "530" ] && break; sleep 3
+          done
+          ip=$(curl -s https://1.1.1.1/cdn-cgi/trace | sed -n 's/^ip=//p')
+          printf '{"host":"%s","uuid":"%s","ip":"%s"}\n' "$host" "$uuid" "$ip" > endpoint.json
+          echo "server exit IP: $ip, tunnel: $host"
+          gh release create "$ENDPOINT_TAG" endpoint.json -R "$GITHUB_REPOSITORY" --prerelease \
+            --title "Windows e2e endpoint (temporary)" --notes "Deleted when run $GITHUB_RUN_ID ends."
+
+      - name: Serve until the Windows check ends
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 210); do
+            state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" -q '.jobs[] | select(.name=="e2e") | .status' || true)
+            [ "$state" = completed ] && break; sleep 10
+          done
+          echo "connections through the test server:"
+          grep -oE 'accepted (tcp|udp):[^ ]+' ~/srv/access.log | sort | uniq -c | sort -rn | head -20 || true
+
+      - name: Remove the endpoint release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "$ENDPOINT_TAG" -R "$GITHUB_REPOSITORY" --cleanup-tag -y || true
+
   e2e:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -40,35 +100,21 @@ jobs:
           gh release download $tag -R $env:RELEASES_REPO -p '*windows-amd64-portable.zip' -D "$env:WORK\dl"
           $zip = Get-ChildItem "$env:WORK\dl" -Filter *.zip | Select-Object -First 1
           Expand-Archive $zip.FullName -DestinationPath "$env:WORK\app"
-          # Use the Xray binary shipped inside the app for the test server too.
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $jar = Get-ChildItem "$env:WORK\app\MurkaVPN\app" -Filter 'desktopApp-*.jar' | Select-Object -First 1
-          $archive = [IO.Compression.ZipFile]::OpenRead($jar.FullName)
-          $entry = $archive.GetEntry('native/xray-windows-amd64.exe')
-          [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, "$env:WORK\xray-server.exe", $true)
-          $archive.Dispose()
 
-      - name: Start the test server and seed the app
+      - name: Seed the app with the test server
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $route = Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Sort-Object RouteMetric | Select-Object -First 1
-          $alias = $route.InterfaceAlias
-          $ip = (Get-NetIPAddress -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4).IPAddress | Select-Object -First 1
-          "Physical interface: $alias ($ip)"
-          $uuid = [guid]::NewGuid().ToString()
-          $server = @{
-            log = @{ access = "$env:WORK\server-access.log"; loglevel = 'warning' }
-            inbounds = @(@{ listen = $ip; port = [int]$env:SERVER_PORT; protocol = 'vless'
-              settings = @{ clients = @(@{ id = $uuid }); decryption = 'none' }; streamSettings = @{ network = 'tcp' } })
-            # The server's own traffic must leave through the real interface, not the app's tunnel.
-            outbounds = @(@{ protocol = 'freedom'; streamSettings = @{ sockopt = @{ interface = $alias } } })
+          $endpoint = $null
+          for ($i = 0; $i -lt 60 -and -not $endpoint; $i++) {
+            gh release download $env:ENDPOINT_TAG -R $env:GITHUB_REPOSITORY -p endpoint.json -D "$env:WORK\ep" --clobber 2>$null
+            if (Test-Path "$env:WORK\ep\endpoint.json") { $endpoint = Get-Content "$env:WORK\ep\endpoint.json" | ConvertFrom-Json } else { Start-Sleep 5 }
           }
-          $server | ConvertTo-Json -Depth 10 | Set-Content "$env:WORK\server.json" -Encoding utf8
-          Start-Process "$env:WORK\xray-server.exe" -ArgumentList 'run','-c',"$env:WORK\server.json" `
-            -RedirectStandardOutput "$env:WORK\server.out" -RedirectStandardError "$env:WORK\server.err" -WindowStyle Hidden
-          Start-Sleep 2
-
+          if (-not $endpoint) { throw 'test server did not publish its endpoint' }
+          $endpoint.ip | Set-Content "$env:WORK\server-ip.txt"
+          "test server exit IP: $($endpoint.ip)"
           # Same shape as a Remnawave Xray-JSON subscription entry.
           $client = @{
             remarks = 'CI test server'
@@ -77,11 +123,13 @@ jobs:
             inbounds = @(@{ tag = 'socks'; listen = '127.0.0.1'; port = 10808; protocol = 'socks'; settings = @{ udp = $true } })
             outbounds = @(
               @{ tag = 'proxy'; protocol = 'vless'
-                 settings = @{ vnext = @(@{ address = $ip; port = [int]$env:SERVER_PORT; users = @(@{ id = $uuid; encryption = 'none' }) }) }
-                 streamSettings = @{ network = 'tcp'; security = 'none' } },
+                 settings = @{ vnext = @(@{ address = $endpoint.host; port = 443; users = @(@{ id = $endpoint.uuid; encryption = 'none' }) }) }
+                 streamSettings = @{ network = 'ws'; security = 'tls'
+                   tlsSettings = @{ serverName = $endpoint.host }
+                   wsSettings = @{ path = '/murka'; headers = @{ Host = $endpoint.host } } } },
               @{ tag = 'direct'; protocol = 'freedom' },
               @{ tag = 'block'; protocol = 'blackhole' })
-            routing = @{ rules = @() }
+            routing = @{ rules = @(@{ type = 'field'; ip = @('geoip:private'); outboundTag = 'direct' }) }
           }
           $clientJson = $client | ConvertTo-Json -Depth 10 -Compress
           $data = Join-Path $env:APPDATA 'MurkaVPN'
@@ -90,7 +138,9 @@ jobs:
              locations = @(@{ storage_id = 'xray'; name = 'CI test server'; kind = 'xray'; xray_config = $clientJson }) } |
             ConvertTo-Json -Depth 10 | Set-Content "$data\locations_v4.json" -Encoding utf8
           '{"enabled":false}' | Set-Content "$data\telemetry.json" -Encoding utf8
-          "direct IP: $(curl.exe -s --max-time 15 https://1.1.1.1/cdn-cgi/trace | Select-String '^ip=')"
+          $direct = curl.exe -s --max-time 15 https://1.1.1.1/cdn-cgi/trace | Select-String '^ip='
+          "direct $direct"
+          "$direct".Replace('ip=', '') | Set-Content "$env:WORK\direct-ip.txt"
 
       - name: Connect (system VPN mode)
         shell: pwsh
@@ -115,19 +165,19 @@ jobs:
       - name: Traffic goes through the VPN
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
           $failures = @()
-          $byIp = curl.exe -s --max-time 20 https://1.1.1.1/cdn-cgi/trace
-          if ($LASTEXITCODE -ne 0) { $failures += "HTTPS to 1.1.1.1 failed ($LASTEXITCODE)" } else { "1.1.1.1: $($byIp | Select-String '^ip=')" }
+          $serverIp = (Get-Content "$env:WORK\server-ip.txt").Trim()
+          $directIp = (Get-Content "$env:WORK\direct-ip.txt").Trim()
+          $trace = curl.exe -s --max-time 20 https://1.1.1.1/cdn-cgi/trace
+          $exitIp = "$($trace | Select-String '^ip=')".Replace('ip=', '').Trim()
+          "exit IP through VPN: '$exitIp' (server $serverIp, direct $directIp)"
+          if ($exitIp -ne $serverIp) { $failures += "exit IP '$exitIp' is not the test server's $serverIp" }
           $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 20 https://www.google.com/generate_204
-          if ($code -ne '204') { $failures += "google generate_204 returned '$code'" } else { 'google: 204 (DNS + HTTPS by name OK)' }
+          if ($code -ne '204') { $failures += "google generate_204 returned '$code'" } else { 'google.com: 204 (DNS + HTTPS by name)' }
           $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 20 https://github.com
           if ($code -ne '200') { $failures += "github.com returned '$code'" } else { 'github.com: 200' }
-          Start-Sleep 2
-          $access = Get-Content "$env:WORK\server-access.log" -ErrorAction SilentlyContinue
-          foreach ($target in '1.1.1.1:443', 'www.google.com:443', 'github.com:443') {
-            if ($access -match [regex]::Escape($target)) { "server saw $target" } else { $failures += "test server never saw ${target}: traffic bypassed the VPN" }
-          }
+          $resolved = Resolve-DnsName example.com -Type A -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $resolved) { $failures += 'system DNS lookup failed while connected' } else { "system DNS: example.com -> $($resolved.IPAddress)" }
           if ($failures) { $failures | ForEach-Object { "::error::$_" }; exit 1 }
 
       - name: Stays up under load
@@ -165,7 +215,7 @@ jobs:
           [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("$env:WORK\screen.png")
           New-Item -ItemType Directory -Force "$env:WORK\out" | Out-Null
-          Copy-Item "$env:WORK\screen.png", "$env:WORK\server-access.log" "$env:WORK\out" -ErrorAction SilentlyContinue
+          Copy-Item "$env:WORK\screen.png" "$env:WORK\out" -ErrorAction SilentlyContinue
           Copy-Item (Join-Path $env:APPDATA 'MurkaVPN\murka.log*') "$env:WORK\out" -ErrorAction SilentlyContinue
           '--- murka.log (tail) ---'
           Get-Content (Join-Path $env:APPDATA 'MurkaVPN\murka.log') -Tail 60 -ErrorAction SilentlyContinue
