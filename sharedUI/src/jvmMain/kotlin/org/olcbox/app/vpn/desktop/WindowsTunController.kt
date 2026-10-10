@@ -152,6 +152,9 @@ internal class WindowsTunController(
               Where-Object { ${'$'}_.IPAddress -eq '$TUN_IPV4_ADDRESS' } |
               Remove-NetIPAddress -Confirm:${'$'}false -ErrorAction SilentlyContinue
 
+            # Skip duplicate address detection: a fresh address stays 'Tentative' for seconds and
+            # connections through the tunnel fail until it turns 'Preferred'.
+            Set-NetIPInterface -InterfaceIndex ${'$'}ifIndex -AddressFamily IPv4 -DadTransmits 0 -ErrorAction SilentlyContinue
             New-NetIPAddress -InterfaceIndex ${'$'}ifIndex -IPAddress '$TUN_IPV4_ADDRESS' -PrefixLength $TUN_IPV4_PREFIX_LENGTH -AddressFamily IPv4 | Out-Null
 
             Get-NetRoute -InterfaceIndex ${'$'}ifIndex -DestinationPrefix '0.0.0.0/1' -ErrorAction SilentlyContinue |
@@ -162,6 +165,14 @@ internal class WindowsTunController(
             New-NetRoute -InterfaceIndex ${'$'}ifIndex -DestinationPrefix '0.0.0.0/1' -NextHop '0.0.0.0' -RouteMetric 1 | Out-Null
             New-NetRoute -InterfaceIndex ${'$'}ifIndex -DestinationPrefix '128.0.0.0/1' -NextHop '0.0.0.0' -RouteMetric 1 | Out-Null
             Set-DnsClientServerAddress -InterfaceIndex ${'$'}ifIndex -ServerAddresses '$MAPDNS_ADDRESS'
+
+            # Report the tunnel as up only once Windows will actually send through it.
+            ${'$'}deadline = (Get-Date).AddSeconds(10)
+            while ((Get-Date) -lt ${'$'}deadline) {
+              ${'$'}state = (Get-NetIPAddress -InterfaceIndex ${'$'}ifIndex -IPAddress '$TUN_IPV4_ADDRESS' -ErrorAction SilentlyContinue).AddressState
+              if ("${'$'}state" -eq 'Preferred') { break }
+              Start-Sleep -Milliseconds 200
+            }
             """.trimIndent()
         )
     }
