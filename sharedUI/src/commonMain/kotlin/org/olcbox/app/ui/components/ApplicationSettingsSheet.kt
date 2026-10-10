@@ -120,7 +120,7 @@ fun ApplicationSettingsSheet(
     connectionDetails: List<Pair<String, String>>,
     socksProxySettings: ApplicationSocksProxySettings? = null,
     routingModeOptions: List<ApplicationRoutingModeOption> = listOf(
-        ApplicationRoutingModeOption("proxy", "Proxy", "Локальный SOCKS")
+        ApplicationRoutingModeOption("vpn", "VPN", "Весь трафик iPhone через Мурку")
     ),
     selectedRoutingModeId: String = routingModeOptions.firstOrNull()?.id.orEmpty(),
     isConnectionActive: Boolean = false,
@@ -305,14 +305,14 @@ private fun SharedSettingsHubContent(
         SharedSettingsHeader(
             icon = Icons.Outlined.Settings,
             title = "Настройки приложения",
-            subtitle = "SOCKS"
+            subtitle = "VPN"
         )
 
         Spacer(Modifier.height(8.dp))
 
         SharedNavigationRow(
             title = "Подключение",
-            value = "Режим и SOCKS5-прокси",
+            value = "Системный VPN",
             icon = Icons.Rounded.Public,
             onClick = onConnectionClick
         )
@@ -420,7 +420,7 @@ private fun SharedConnectionModeSettingsContent(
         SharedDetailHeader(
             title = "Режим подключения",
             subtitle = options.firstOrNull { it.id == selectedId }?.title
-                ?: "Локальный SOCKS5-прокси",
+                ?: "Системный VPN",
             onBack = onBack
         )
 

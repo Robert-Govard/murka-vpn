@@ -29,8 +29,6 @@ import org.olcbox.app.data.share.SubscriptionShareItem
 import org.olcbox.app.ui.OlcboxAppContent
 import org.olcbox.app.ui.components.ApplicationSettingsSheet
 import org.olcbox.app.ui.components.ApplicationUpdateOfferSheet
-import org.olcbox.app.ui.components.IosSocksOnboardingDialog
-import org.olcbox.app.ui.components.socksSettingsText
 import org.olcbox.app.ui.features.home.HomeScreenViewModel
 import org.olcbox.app.ui.features.locations.LocationItem
 import org.olcbox.app.ui.features.locations.LocationViewModel
@@ -45,7 +43,6 @@ import org.olcbox.app.update.isDownloaded
 import org.olcbox.app.update.isUpdateCheckDue
 import org.olcbox.app.update.shouldShowOffer
 import org.olcbox.app.vpn.IosVpnManager
-import platform.Foundation.NSUserDefaults
 import platform.UIKit.UIViewController
 
 class IosAppFactory {
@@ -128,11 +125,6 @@ private fun IosApp(
     var updateStatusText by remember { mutableStateOf<String?>(null) }
     var updateDownloadProgress by remember { mutableStateOf<Float?>(null) }
     var updateOffer by remember { mutableStateOf<AppUpdateInfo?>(null) }
-    var showSocksOnboarding by remember {
-        mutableStateOf(
-            !NSUserDefaults.standardUserDefaults.boolForKey(IOS_SOCKS_ONBOARDING_SEEN_KEY)
-        )
-    }
 
     fun reloadLocationsAfterImport(onComplete: () -> Unit = {}) {
         dependencies.locationViewModel.loadLocations {
@@ -210,8 +202,7 @@ private fun IosApp(
         CompositionLocalProvider(LocalTelemetry provides dependencies.telemetry) {
         val logs by dependencies.homeViewModel.logs.collectAsState()
         val homeState by dependencies.homeViewModel.state.collectAsState()
-        val socksProxySettings by dependencies.vpnManager.socksProxySettings.collectAsState()
-        val connectionSummary = "SOCKS5 127.0.0.1:${socksProxySettings.port}"
+        val connectionSummary = "Системный VPN"
 
         Box(modifier = Modifier.fillMaxSize()) {
             OlcboxAppContent(
@@ -270,7 +261,6 @@ private fun IosApp(
                 onDeepLinkOpened = {
                     isAppSettingsOpen = false
                     updateOffer = null
-                    showSocksOnboarding = false
                 }
             )
 
@@ -283,12 +273,7 @@ private fun IosApp(
                     subscriptions = iosSubscriptionItems(dependencies.locationViewModel.locations.toList()),
                     logs = logs,
                     connectionSummary = connectionSummary,
-                    connectionDetails = listOf(
-                        "Mode" to "Local SOCKS5 proxy",
-                        "Host" to "127.0.0.1",
-                        "Port" to socksProxySettings.port.toString()
-                    ),
-                    socksProxySettings = socksProxySettings,
+                    connectionDetails = listOf("Тип" to "VPN iOS: весь трафик iPhone идёт через Мурку"),
                     isConnectionActive = homeState.isVpnConnected,
                     onDismiss = { isAppSettingsOpen = false },
                     onCopyConfigClick = {
@@ -366,23 +351,6 @@ private fun IosApp(
                 )
             }
 
-            if (showSocksOnboarding) {
-                IosSocksOnboardingDialog(
-                    settings = socksProxySettings,
-                    onCopy = {
-                        platformBridge.writeClipboard(socksSettingsText(socksProxySettings))
-                        platformBridge.showMessage("SOCKS5 settings copied")
-                    },
-                    onDismiss = {
-                        NSUserDefaults.standardUserDefaults.setBool(
-                            true,
-                            forKey = IOS_SOCKS_ONBOARDING_SEEN_KEY
-                        )
-                        showSocksOnboarding = false
-                    }
-                )
-            }
-
             updateOffer?.let { info ->
                 ApplicationUpdateOfferSheet(
                     info = info,
@@ -395,8 +363,6 @@ private fun IosApp(
     }
     }
 }
-
-private const val IOS_SOCKS_ONBOARDING_SEEN_KEY = "ios_socks_onboarding_seen_v1"
 
 private fun iosSubscriptionItems(items: List<LocationItem>): List<SubscriptionShareItem> {
     return items
