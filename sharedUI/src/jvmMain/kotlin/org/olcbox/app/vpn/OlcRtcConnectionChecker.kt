@@ -1,6 +1,7 @@
 package org.olcbox.app.vpn
 
 import kotlinx.coroutines.CancellationException
+import org.olcbox.app.vpn.desktop.WindowsProcessJob
 import org.olcbox.app.vpn.desktop.XrayProcess
 import org.olcbox.app.data.xray.XrayConfig
 import kotlinx.coroutines.CompletableDeferred
@@ -271,6 +272,7 @@ internal object OlcRtcConnectionChecker {
             runCatching { Files.deleteIfExists(configPath) }
             throw e
         }
+        WindowsProcessJob.adopt(process)
 
         coroutineScopeReader(scope, process, ready)
         scope.launch(Dispatchers.IO) {
@@ -356,6 +358,7 @@ internal object OlcRtcConnectionChecker {
         return try {
             val command = XrayProcess.command(DesktopNativeAssets.resolveXrayBinary(), configPath)
             process = ProcessBuilder(command).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+            WindowsProcessJob.adopt(process)
             val deadline = System.currentTimeMillis() + OLC_READY_TIMEOUT_MS
             while (!canConnectToSocks(port)) {
                 if (!process.isAlive || System.currentTimeMillis() > deadline) return null

@@ -22,6 +22,9 @@ internal class WindowsTunController(
             .directory(tun2SocksBinary.parent.toFile())
             .redirectErrorStream(true)
             .start()
+        if (!WindowsProcessJob.adopt(process)) {
+            addLog("Warning: tun2socks is not tied to the app; if the app crashes, quit tun2socks to restore internet")
+        }
 
         try {
             waitForAdapter(process)
