@@ -126,7 +126,7 @@ jobs:
           Start-Sleep 2
           $access = Get-Content "$env:WORK\server-access.log" -ErrorAction SilentlyContinue
           foreach ($target in '1.1.1.1:443', 'www.google.com:443', 'github.com:443') {
-            if ($access -match [regex]::Escape($target)) { "server saw $target" } else { $failures += "test server never saw $target: traffic bypassed the VPN" }
+            if ($access -match [regex]::Escape($target)) { "server saw $target" } else { $failures += "test server never saw ${target}: traffic bypassed the VPN" }
           }
           if ($failures) { $failures | ForEach-Object { "::error::$_" }; exit 1 }
 
@@ -136,29 +136,24 @@ jobs:
           SOAK: ${{ inputs.soak_minutes }}
         run: |
           $end = (Get-Date).AddMinutes([int]$env:SOAK)
-          $ok = 0; $bad = 0; $speeds = @()
+          $ok = 0; $bad = 0; $speeds = @(); $upSpeeds = @()
+          $bytes = New-Object byte[] (10MB); (New-Object Random).NextBytes($bytes)
+          [IO.File]::WriteAllBytes("$env:WORK\upload.bin", $bytes)
           while ((Get-Date) -lt $end) {
             $out = curl.exe -s -o NUL -w '%{http_code} %{speed_download}' --max-time 30 'https://speed.cloudflare.com/__down?bytes=20000000'
             $parts = "$out".Split(' ')
             if ($LASTEXITCODE -eq 0 -and $parts[0] -eq '200') { $ok++; $speeds += [double]$parts[1] } else { $bad++; "download failed: $out (curl $LASTEXITCODE)" }
             $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 15 https://www.google.com/generate_204
             if ($code -ne '204') { $bad++; "generate_204 failed: $code" } else { $ok++ }
+            $up = curl.exe -s -o NUL -w '%{http_code} %{speed_upload}' --max-time 30 --data-binary "@$env:WORK\upload.bin" https://speed.cloudflare.com/__up
+            $upParts = "$up".Split(' ')
+            if ($LASTEXITCODE -eq 0 -and $upParts[0] -eq '200') { $ok++; $upSpeeds += [double]$upParts[1] } else { $bad++; "upload failed: $up (curl $LASTEXITCODE)" }
           }
           $mbit = if ($speeds) { [math]::Round((($speeds | Measure-Object -Average).Average) * 8 / 1e6, 1) } else { 0 }
-          "requests ok=$ok failed=$bad, average download $mbit Mbit/s"
+          $upMbit = if ($upSpeeds) { [math]::Round((($upSpeeds | Measure-Object -Average).Average) * 8 / 1e6, 1) } else { 0 }
+          "requests ok=$ok failed=$bad, average download $mbit Mbit/s, upload $upMbit Mbit/s"
           if (-not (Get-Process MurkaVPN -ErrorAction SilentlyContinue)) { '::error::MurkaVPN died during the soak'; exit 1 }
           if ($bad -gt 0) { "::error::$bad failed requests during the soak"; exit 1 }
-
-      - name: Internet survives an app crash
-        shell: pwsh
-        run: |
-          Get-Process MurkaVPN -ErrorAction SilentlyContinue | Stop-Process -Force
-          Start-Sleep 5
-          $left = Get-Process | Where-Object { $_.ProcessName -match 'tun2socks|xray-windows' }
-          if ($left) { "still running after the app died: $($left.ProcessName -join ', ')" }
-          $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 20 https://www.google.com/generate_204
-          if ($code -ne '204') { "::error::no internet after the app was killed (got '$code')"; Get-NetRoute -AddressFamily IPv4 | Format-Table -AutoSize; exit 1 }
-          'internet works after the app was killed'
 
       - name: Screenshot and logs
         if: always()
@@ -175,8 +170,21 @@ jobs:
           '--- murka.log (tail) ---'
           Get-Content (Join-Path $env:APPDATA 'MurkaVPN\murka.log') -Tail 60 -ErrorAction SilentlyContinue
 
+      - name: Internet survives an app crash
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process MurkaVPN -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 5
+          $left = Get-Process | Where-Object { $_.ProcessName -match 'tun2socks|xray-windows' }
+          if ($left) { "still running after the app died: $($left.ProcessName -join ', ')" }
+          $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 20 https://www.google.com/generate_204
+          if ($code -ne '204') { "::error::no internet after the app was killed (got '$code')"; Get-NetRoute -AddressFamily IPv4 | Format-Table -AutoSize; exit 1 }
+          'internet works after the app was killed'
+
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: windows-e2e
           path: C:\murka-e2e\out
