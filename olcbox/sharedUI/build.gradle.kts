@@ -34,6 +34,13 @@ val olcrtcCommitSha = providers.gradleProperty("olcbox.olcrtcSha")
 val olcrtcAndroidAar = layout.buildDirectory.file("generated/olcrtc/olcrtc.aar")
 val olcrtcAndroidAarFile = olcrtcAndroidAar.get().asFile
 val olcrtcIosXcframework = layout.buildDirectory.dir("generated/olcrtc/ios/OlcRtcMobile.xcframework")
+// iOS links one Go runtime too: murka-core binds olcrtc/mobile and xraymobile together
+// (the framework keeps the OlcRtcMobile name so the Xcode project stays unchanged).
+val murkaCoreRepoDir = rootProject.file(
+    providers.environmentVariable("MURKA_CORE_REPO")
+        .orElse(rootProject.layout.projectDirectory.asFile.parentFile.resolve("murka-core").absolutePath)
+        .get()
+)
 val olcrtcIosXcframeworkDir = olcrtcIosXcframework.get().asFile
 
 abstract class GenerateAppInfoTask : DefaultTask() {
@@ -74,16 +81,18 @@ val generateAppInfo by tasks.registering(GenerateAppInfoTask::class) {
 
 val buildOlcrtcIosXcframework by tasks.registering(Exec::class) {
     group = "build"
-    description = "Builds olcrtc iOS XCFramework from OLCRTC_REPO using gomobile."
+    description = "Builds the olcrtc + xray iOS XCFramework from MURKA_CORE_REPO using gomobile."
 
     inputs.dir(olcrtcRepoDir.resolve("mobile"))
     inputs.dir(olcrtcRepoDir.resolve("internal"))
     inputs.dir(olcrtcRepoDir.resolve("pkg"))
     inputs.files(olcrtcRepoDir.resolve("go.mod"), olcrtcRepoDir.resolve("go.sum"))
+    inputs.dir(murkaCoreRepoDir.resolve("xraymobile"))
+    inputs.files(murkaCoreRepoDir.resolve("go.mod"), murkaCoreRepoDir.resolve("go.sum"))
     val frameworkDir = olcrtcIosXcframeworkDir
     outputs.dir(frameworkDir)
 
-    workingDir = olcrtcRepoDir
+    workingDir = murkaCoreRepoDir
 
     doFirst {
         frameworkDir.deleteRecursively()
@@ -98,7 +107,8 @@ val buildOlcrtcIosXcframework by tasks.registering(Exec::class) {
         "-s -w -checklinkname=0",
         "-o",
         olcrtcIosXcframeworkDir.absolutePath,
-        "./mobile"
+        "github.com/openlibrecommunity/olcrtc/mobile",
+        "./xraymobile"
     )
 }
 

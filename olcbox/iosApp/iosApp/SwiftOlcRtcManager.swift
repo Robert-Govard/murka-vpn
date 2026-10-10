@@ -8,6 +8,13 @@ import UIKit
 final class SwiftOlcRtcManager: NSObject, @unchecked Sendable, IosOlcRtcBridge {
     private var logWriter: IosLogWriter?
     private var runtime = MobileNew()!
+    /// Regular (Remnawave) servers run on Xray; at most one of the two cores is active.
+    private var xray: XraymobileRuntime?
+    private static let assetsReady: Void = {
+        if let resources = Bundle.main.resourcePath {
+            XraymobileSetAssetDir(resources + "/xray")
+        }
+    }()
     private let logLock = NSLock()
     private lazy var nativeLogWriter = NativeLogWriter { [weak self] in self?.log($0) }
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -22,6 +29,10 @@ final class SwiftOlcRtcManager: NSObject, @unchecked Sendable, IosOlcRtcBridge {
 
     func start(request: IosOlcRtcStartRequest) -> IosBridgeResult {
         lock.lock()
+        if let running = xray {
+            xray = nil
+            try? running.stop()
+        }
         let previous = runtime
         let next = MobileNew()!
         runtime = next
@@ -88,7 +99,42 @@ final class SwiftOlcRtcManager: NSObject, @unchecked Sendable, IosOlcRtcBridge {
         lock.unlock()
     }
 
+    func startXray(configJson: String) -> IosBridgeResult {
+        _ = SwiftOlcRtcManager.assetsReady
+        lock.lock()
+        defer { lock.unlock() }
+        stopLocked()
+        guard let next = XraymobileNew() else {
+            return IosBridgeResult(success: false, message: "Xray runtime unavailable")
+        }
+        do {
+            try next.start(configJson)
+        } catch {
+            return IosBridgeResult(success: false, message: error.localizedDescription)
+        }
+        xray = next
+        log("Xray started (\(XraymobileVersion()))")
+        keepAlive.start(log: makeLogger())
+        beginBackgroundTaskIfNeeded()
+        return IosBridgeResult(success: true, message: nil)
+    }
+
+    func checkXray(configJson: String, url: String, timeoutMillis: Int64) -> IosLongResult {
+        _ = SwiftOlcRtcManager.assetsReady
+        do {
+            var value: Int = -1
+            try XraymobileCheck(configJson, url, Int(timeoutMillis), &value)
+            return IosLongResult(success: true, valueMillis: Int64(value), message: nil)
+        } catch {
+            return IosLongResult(success: false, valueMillis: -1, message: error.localizedDescription)
+        }
+    }
+
     private func stopLocked() {
+        if let running = xray {
+            xray = nil
+            try? running.stop()
+        }
         let previous = runtime
         runtime = MobileNew()!
         try? previous.stop(1)
@@ -100,7 +146,7 @@ final class SwiftOlcRtcManager: NSObject, @unchecked Sendable, IosOlcRtcBridge {
     func isRunning() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return runtime.state() == "running"
+        return runtime.state() == "running" || (xray?.isRunning() ?? false)
     }
 
     func ping(request: IosOlcRtcCheckRequest) -> IosLongResult {

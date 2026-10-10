@@ -58,6 +58,9 @@ interface IosOlcRtcBridge {
     fun isRunning(): Boolean
     fun ping(request: IosOlcRtcCheckRequest): IosLongResult
     fun check(request: IosOlcRtcCheckRequest): IosLongResult
+    /** Regular (Remnawave) server: Xray with a SOCKS inbound, as prepared by XrayConfig. */
+    fun startXray(configJson: String): IosBridgeResult
+    fun checkXray(configJson: String, url: String, timeoutMillis: Long): IosLongResult
 }
 
 interface IosPlatformBridge {

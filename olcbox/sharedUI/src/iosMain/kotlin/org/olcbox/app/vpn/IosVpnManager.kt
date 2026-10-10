@@ -1,5 +1,6 @@
 package org.olcbox.app.vpn
 
+import org.olcbox.app.data.xray.XrayConfig
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
@@ -174,17 +175,25 @@ class IosVpnManager(
             return
         }
 
-        val deviceId = locationsRepository.getDeviceIdentity()
         val socksSettings = _socksProxySettings.value
-        val request = location.startRequest(deviceId, socksSettings)
-
-        addLog(
-            "Starting iOS SOCKS provider=${location.bypassProvider}, " +
-                "transport=${location.transport}, room=${location.id}, port=${socksSettings.port}"
-        )
-
-        val result = withContext(Dispatchers.Default) {
-            olcRtcBridge.start(request)
+        val result = if (location.isXray) {
+            addLog("Starting iOS SOCKS via Xray (${location.name}), port=${socksSettings.port}")
+            val config = XrayConfig.prepare(
+                raw = location.xrayConfig,
+                socksHost = "127.0.0.1",
+                socksPort = socksSettings.port,
+                username = socksSettings.username,
+                password = socksSettings.password
+            )
+            withContext(Dispatchers.Default) { olcRtcBridge.startXray(config) }
+        } else {
+            val deviceId = locationsRepository.getDeviceIdentity()
+            val request = location.startRequest(deviceId, socksSettings)
+            addLog(
+                "Starting iOS SOCKS provider=${location.bypassProvider}, " +
+                    "transport=${location.transport}, room=${location.id}, port=${socksSettings.port}"
+            )
+            withContext(Dispatchers.Default) { olcRtcBridge.start(request) }
         }
 
         if (requestedGeneration != generation) return
@@ -209,6 +218,11 @@ class IosVpnManager(
     ): Long? = withContext(Dispatchers.Default) {
         val config = locationConfig.normalized()
         if (!config.isComplete()) return@withContext null
+        if (config.isXray) {
+            val result = olcRtcBridge.checkXray(XrayConfig.forCheck(config.xrayConfig), HTTP_PING_URL, CHECK_TIMEOUT_MS)
+            if (!result.success) addLog("Xray check ${config.name} failed: ${result.message}")
+            return@withContext if (result.success && result.valueMillis >= 0L) result.valueMillis else null
+        }
         val request = IosOlcRtcCheckRequest(
             carrierName = config.bypassProvider,
             transportName = config.transport,
