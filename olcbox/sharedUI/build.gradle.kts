@@ -118,6 +118,12 @@ kotlin {
         compileSdk = 37
         minSdk = 23
 
+        // Compose resources (logo, icons, fonts, strings) ship as Android assets only when
+        // the KMP library enables Android resources; without it the app crashes at start.
+        androidResources {
+            enable = true
+        }
+
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
         }

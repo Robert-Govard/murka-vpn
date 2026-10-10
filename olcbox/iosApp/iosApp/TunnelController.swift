@@ -28,7 +28,12 @@ final class TunnelController: @unchecked Sendable {
     }
 
     func start(_ options: TunnelOptions, timeout: TimeInterval) throws {
-        let manager = try loadManager()
+        let manager: NETunnelProviderManager
+        do {
+            manager = try loadManager()
+        } catch {
+            throw Self.profileError(error)
+        }
         let proto = NETunnelProviderProtocol()
         proto.providerBundleIdentifier = (Bundle.main.bundleIdentifier ?? "") + Self.extensionBundleSuffix
         proto.serverAddress = Self.displayName
@@ -40,7 +45,7 @@ final class TunnelController: @unchecked Sendable {
         do {
             try Self.wait { manager.saveToPreferences(completionHandler: $0) }
         } catch {
-            throw TunnelError("Разрешите Мурке добавить VPN-конфигурацию (\(error.localizedDescription))")
+            throw Self.profileError(error)
         }
         try Self.wait { manager.loadFromPreferences(completionHandler: $0) }
 
@@ -134,6 +139,21 @@ final class TunnelController: @unchecked Sendable {
         self.manager = manager
         lock.unlock()
         return manager
+    }
+
+    /// Unsigned or free-account builds lack the Network Extension entitlement: iOS answers "permission denied".
+    private static func profileError(_ error: Error) -> Error {
+        let nsError = error as NSError
+        if nsError.domain == NEVPNErrorDomain && nsError.code == NEVPNError.configurationReadWriteFailed.rawValue
+            || nsError.localizedDescription.localizedCaseInsensitiveContains("permission denied") {
+            return TunnelError(
+                "iOS не разрешает этой сборке включать VPN: нужна версия, подписанная Apple (TestFlight)"
+            )
+        }
+        if nsError.domain == NEVPNErrorDomain && nsError.code == NEVPNError.configurationInvalid.rawValue {
+            return TunnelError("Разрешите Мурке добавить VPN-конфигурацию (\(error.localizedDescription))")
+        }
+        return TunnelError("Не удалось сохранить VPN-профиль: \(error.localizedDescription)")
     }
 
     private static func isActive(_ status: NEVPNStatus) -> Bool {
