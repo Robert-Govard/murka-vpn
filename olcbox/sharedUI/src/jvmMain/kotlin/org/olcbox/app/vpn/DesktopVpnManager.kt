@@ -235,7 +235,7 @@ class DesktopVpnManager private constructor(
                     startupFailure = startupFailure,
                     bindInterface = bindInterface,
                     privileged = desktopMode == DesktopMode.LinuxTun,
-                    pinServers = desktopMode == DesktopMode.MacTun
+                    pinServers = desktopMode == DesktopMode.MacTun || desktopMode == DesktopMode.WindowsTun
                 )
             } else {
                 startOlcRtcProcessWithFallback(
@@ -621,8 +621,9 @@ class DesktopVpnManager private constructor(
     ): Process {
         val binary = DesktopNativeAssets.resolveXrayBinary()
         val assetsDir = DesktopNativeAssets.resolveXrayAssetsDir()
-        // The macOS TUN sends system DNS through the tunnel; resolve the servers first so
-        // Xray never needs the tunnel to find its own server.
+        // The macOS and Windows TUNs send system DNS through the tunnel; resolve the servers
+        // first so Xray never needs the tunnel to find its own server (on Windows that stalled
+        // every new connection ~10 s until DNS fell back to the physical adapter).
         val raw = if (pinServers) {
             XrayConfig.pinServerAddresses(location.xrayConfig) { host ->
                 runCatching { InetAddress.getAllByName(host).firstOrNull { it is Inet4Address }?.hostAddress }.getOrNull()
