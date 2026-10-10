@@ -1,0 +1,183 @@
+# End-to-end check of a published Windows build on a real Windows machine:
+# the app starts in its default mode (system VPN: wintun + tun2socks + Xray)
+# against a throwaway Xray server on the same runner, so no real keys are used.
+name: Windows end-to-end
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag in murka-vpn-releases (latest = newest stable)
+        default: latest
+      soak_minutes:
+        description: How long to keep downloading through the VPN
+        default: '3'
+
+permissions:
+  contents: read
+
+env:
+  RELEASES_REPO: Robert-Govard/murka-vpn-releases
+  WORK: C:\murka-e2e
+  SERVER_PORT: '10443'
+
+jobs:
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download the build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:TAG
+          if ($tag -eq 'latest') { $tag = gh release view -R $env:RELEASES_REPO --json tagName -q .tagName }
+          "Testing $tag"
+          New-Item -ItemType Directory -Force $env:WORK | Out-Null
+          gh release download $tag -R $env:RELEASES_REPO -p '*windows-amd64-portable.zip' -D "$env:WORK\dl"
+          $zip = Get-ChildItem "$env:WORK\dl" -Filter *.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath "$env:WORK\app"
+          # Use the Xray binary shipped inside the app for the test server too.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $jar = Get-ChildItem "$env:WORK\app\MurkaVPN\app" -Filter 'desktopApp-*.jar' | Select-Object -First 1
+          $archive = [IO.Compression.ZipFile]::OpenRead($jar.FullName)
+          $entry = $archive.GetEntry('native/xray-windows-amd64.exe')
+          [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, "$env:WORK\xray-server.exe", $true)
+          $archive.Dispose()
+
+      - name: Start the test server and seed the app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $route = Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Sort-Object RouteMetric | Select-Object -First 1
+          $alias = $route.InterfaceAlias
+          $ip = (Get-NetIPAddress -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4).IPAddress | Select-Object -First 1
+          "Physical interface: $alias ($ip)"
+          $uuid = [guid]::NewGuid().ToString()
+          $server = @{
+            log = @{ access = "$env:WORK\server-access.log"; loglevel = 'warning' }
+            inbounds = @(@{ listen = $ip; port = [int]$env:SERVER_PORT; protocol = 'vless'
+              settings = @{ clients = @(@{ id = $uuid }); decryption = 'none' }; streamSettings = @{ network = 'tcp' } })
+            # The server's own traffic must leave through the real interface, not the app's tunnel.
+            outbounds = @(@{ protocol = 'freedom'; streamSettings = @{ sockopt = @{ interface = $alias } } })
+          }
+          $server | ConvertTo-Json -Depth 10 | Set-Content "$env:WORK\server.json" -Encoding utf8
+          Start-Process "$env:WORK\xray-server.exe" -ArgumentList 'run','-c',"$env:WORK\server.json" `
+            -RedirectStandardOutput "$env:WORK\server.out" -RedirectStandardError "$env:WORK\server.err" -WindowStyle Hidden
+          Start-Sleep 2
+
+          # Same shape as a Remnawave Xray-JSON subscription entry.
+          $client = @{
+            remarks = 'CI test server'
+            log = @{ loglevel = 'warning' }
+            dns = @{ servers = @('1.1.1.1') }
+            inbounds = @(@{ tag = 'socks'; listen = '127.0.0.1'; port = 10808; protocol = 'socks'; settings = @{ udp = $true } })
+            outbounds = @(
+              @{ tag = 'proxy'; protocol = 'vless'
+                 settings = @{ vnext = @(@{ address = $ip; port = [int]$env:SERVER_PORT; users = @(@{ id = $uuid; encryption = 'none' }) }) }
+                 streamSettings = @{ network = 'tcp'; security = 'none' } },
+              @{ tag = 'direct'; protocol = 'freedom' },
+              @{ tag = 'block'; protocol = 'blackhole' })
+            routing = @{ rules = @() }
+          }
+          $clientJson = $client | ConvertTo-Json -Depth 10 -Compress
+          $data = Join-Path $env:APPDATA 'MurkaVPN'
+          New-Item -ItemType Directory -Force $data | Out-Null
+          @{ version = 5; active_location_id = 'xray'
+             locations = @(@{ storage_id = 'xray'; name = 'CI test server'; kind = 'xray'; xray_config = $clientJson }) } |
+            ConvertTo-Json -Depth 10 | Set-Content "$data\locations_v4.json" -Encoding utf8
+          '{"enabled":false}' | Set-Content "$data\telemetry.json" -Encoding utf8
+          "direct IP: $(curl.exe -s --max-time 15 https://1.1.1.1/cdn-cgi/trace | Select-String '^ip=')"
+
+      - name: Connect (system VPN mode)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:APPDATA 'MurkaVPN\murka.log'
+          $app = Start-Process "$env:WORK\app\MurkaVPN\MurkaVPN.exe" -ArgumentList '--olcbox-start-vpn-after-elevation' -PassThru
+          $deadline = (Get-Date).AddSeconds(120)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep 3
+            if ((Test-Path $log) -and (Select-String -Path $log -Pattern 'Windows TUN connected|TUN connected' -Quiet)) { break }
+            if (Get-Process -Id $app.Id -ErrorAction SilentlyContinue) { continue }
+            # The app may have relaunched itself elevated: follow the new process.
+            $next = Get-Process MurkaVPN -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $next) { throw 'MurkaVPN exited before connecting' }
+            $app = $next
+          }
+          if (-not (Select-String -Path $log -Pattern 'TUN connected' -Quiet)) { Get-Content $log -Tail 80; throw 'VPN did not connect in 120 s' }
+          "Connected:"; Select-String -Path $log -Pattern 'connected|Xray|TUN' | Select-Object -Last 10 | ForEach-Object Line
+          Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'Wintun|tun' -or $_.Name -match 'olcbox|murka|tun' } | Format-Table Name, Status, InterfaceDescription
+
+      - name: Traffic goes through the VPN
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failures = @()
+          $byIp = curl.exe -s --max-time 20 https://1.1.1.1/cdn-cgi/trace
+          if ($LASTEXITCODE -ne 0) { $failures += "HTTPS to 1.1.1.1 failed ($LASTEXITCODE)" } else { "1.1.1.1: $($byIp | Select-String '^ip=')" }
+          $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 20 https://www.google.com/generate_204
+          if ($code -ne '204') { $failures += "google generate_204 returned '$code'" } else { 'google: 204 (DNS + HTTPS by name OK)' }
+          $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 20 https://github.com
+          if ($code -ne '200') { $failures += "github.com returned '$code'" } else { 'github.com: 200' }
+          Start-Sleep 2
+          $access = Get-Content "$env:WORK\server-access.log" -ErrorAction SilentlyContinue
+          foreach ($target in '1.1.1.1:443', 'www.google.com:443', 'github.com:443') {
+            if ($access -match [regex]::Escape($target)) { "server saw $target" } else { $failures += "test server never saw $target: traffic bypassed the VPN" }
+          }
+          if ($failures) { $failures | ForEach-Object { "::error::$_" }; exit 1 }
+
+      - name: Stays up under load
+        shell: pwsh
+        env:
+          SOAK: ${{ inputs.soak_minutes }}
+        run: |
+          $end = (Get-Date).AddMinutes([int]$env:SOAK)
+          $ok = 0; $bad = 0; $speeds = @()
+          while ((Get-Date) -lt $end) {
+            $out = curl.exe -s -o NUL -w '%{http_code} %{speed_download}' --max-time 30 'https://speed.cloudflare.com/__down?bytes=20000000'
+            $parts = "$out".Split(' ')
+            if ($LASTEXITCODE -eq 0 -and $parts[0] -eq '200') { $ok++; $speeds += [double]$parts[1] } else { $bad++; "download failed: $out (curl $LASTEXITCODE)" }
+            $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 15 https://www.google.com/generate_204
+            if ($code -ne '204') { $bad++; "generate_204 failed: $code" } else { $ok++ }
+          }
+          $mbit = if ($speeds) { [math]::Round((($speeds | Measure-Object -Average).Average) * 8 / 1e6, 1) } else { 0 }
+          "requests ok=$ok failed=$bad, average download $mbit Mbit/s"
+          if (-not (Get-Process MurkaVPN -ErrorAction SilentlyContinue)) { '::error::MurkaVPN died during the soak'; exit 1 }
+          if ($bad -gt 0) { "::error::$bad failed requests during the soak"; exit 1 }
+
+      - name: Internet survives an app crash
+        shell: pwsh
+        run: |
+          Get-Process MurkaVPN -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 5
+          $left = Get-Process | Where-Object { $_.ProcessName -match 'tun2socks|xray-windows' }
+          if ($left) { "still running after the app died: $($left.ProcessName -join ', ')" }
+          $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 20 https://www.google.com/generate_204
+          if ($code -ne '204') { "::error::no internet after the app was killed (got '$code')"; Get-NetRoute -AddressFamily IPv4 | Format-Table -AutoSize; exit 1 }
+          'internet works after the app was killed'
+
+      - name: Screenshot and logs
+        if: always()
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$env:WORK\screen.png")
+          New-Item -ItemType Directory -Force "$env:WORK\out" | Out-Null
+          Copy-Item "$env:WORK\screen.png", "$env:WORK\server-access.log" "$env:WORK\out" -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $env:APPDATA 'MurkaVPN\murka.log*') "$env:WORK\out" -ErrorAction SilentlyContinue
+          '--- murka.log (tail) ---'
+          Get-Content (Join-Path $env:APPDATA 'MurkaVPN\murka.log') -Tail 60 -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-e2e
+          path: C:\murka-e2e\out
+          retention-days: 3
