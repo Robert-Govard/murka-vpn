@@ -58,8 +58,13 @@ interface IosOlcRtcBridge {
     fun isRunning(): Boolean
     fun ping(request: IosOlcRtcCheckRequest): IosLongResult
     fun check(request: IosOlcRtcCheckRequest): IosLongResult
-    /** Regular (Remnawave) server: Xray with a SOCKS inbound, as prepared by XrayConfig. */
-    fun startXray(configJson: String): IosBridgeResult
+    /**
+     * Regular (Remnawave) server: the VPN extension runs Xray with this config (SOCKS inbound
+     * prepared by XrayConfig) and routes the device through that SOCKS endpoint.
+     */
+    fun startXray(configJson: String, socksPort: Int, socksUser: String, socksPass: String): IosBridgeResult
+    /** IPv4 for a host, or null; used to pin Xray server addresses before the tunnel owns DNS. */
+    fun resolveIpv4(host: String): String?
     fun checkXray(configJson: String, url: String, timeoutMillis: Long): IosLongResult
 }
 
