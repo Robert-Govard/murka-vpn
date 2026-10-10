@@ -148,7 +148,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nexport PATH=\"$HOME/go/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nif [ -z \"$ARCHS\" ] || [ \"$ARCHS\" = \"undefined_arch\" ]; then\n  export ARCHS=arm64\nfi\nGRADLE_VERSION_ARGS=\"\"\nif [ -n \"$OLCBOX_VERSION\" ]; then\n  GRADLE_VERSION_ARGS=\"-Polcbox.version=$OLCBOX_VERSION\"\nfi\ncd \"$SRCROOT/..\"\n./gradlew $GRADLE_VERSION_ARGS :sharedUI:buildOlcrtcIosXcframework :sharedUI:embedAndSignAppleFrameworkForXcode --no-configuration-cache\n";
+			shellScript = "set -e\nexport PATH=\"$HOME/go/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nif [ -z \"$ARCHS\" ] || [ \"$ARCHS\" = \"undefined_arch\" ]; then\n  export ARCHS=arm64\nfi\nGRADLE_VERSION_ARGS=\"\"\nif [ -n \"$OLCBOX_VERSION\" ]; then\n  GRADLE_VERSION_ARGS=\"-Polcbox.version=$OLCBOX_VERSION\"\nfi\ncd \"$SRCROOT/..\"\n./gradlew $GRADLE_VERSION_ARGS :sharedUI:buildOlcrtcIosXcframework :sharedUI:embedAndSignAppleFrameworkForXcode --no-configuration-cache\n# Xray routing needs geoip.dat/geosite.dat (scripts/fetch-xray-assets.sh puts them here).\nXRAY_ASSETS=\"$SRCROOT/../androidApp/src/main/assets/xray\"\nif [ -f \"$XRAY_ASSETS/geosite.dat\" ]; then\n  mkdir -p \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/xray\"\n  cp \"$XRAY_ASSETS/geoip.dat\" \"$XRAY_ASSETS/geosite.dat\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/xray/\"\nelse\n  echo \"warning: Xray geo assets missing; run scripts/fetch-xray-assets.sh\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
