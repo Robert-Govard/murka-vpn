@@ -290,6 +290,7 @@ jobs:
         run: |
           app="build/ios-ipa/DerivedData/Build/Products/Release-iphoneos/iosApp.app"
           test -d "$app"
+          test -x "$app/PlugIns/MurkaTunnel.appex/MurkaTunnel"
           rm -rf build/ios-ipa/package dist
           mkdir -p build/ios-ipa/package/Payload dist
           cp -R "$app" build/ios-ipa/package/Payload/
