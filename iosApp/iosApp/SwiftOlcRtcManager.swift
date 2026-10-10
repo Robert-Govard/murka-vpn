@@ -121,13 +121,13 @@ final class SwiftOlcRtcManager: NSObject, @unchecked Sendable, IosOlcRtcBridge {
 
     func checkXray(configJson: String, url: String, timeoutMillis: Int64) -> IosLongResult {
         _ = SwiftOlcRtcManager.assetsReady
-        do {
-            var value: Int = -1
-            try XraymobileCheck(configJson, url, Int(timeoutMillis), &value)
+        // gomobile exports Check as a C function: Swift does not map its NSError** to throws.
+        var value: Int = -1
+        var error: NSError?
+        if XraymobileCheck(configJson, url, Int(timeoutMillis), &value, &error) {
             return IosLongResult(success: true, valueMillis: Int64(value), message: nil)
-        } catch {
-            return IosLongResult(success: false, valueMillis: -1, message: error.localizedDescription)
         }
+        return IosLongResult(success: false, valueMillis: -1, message: error?.localizedDescription ?? "Xray check failed")
     }
 
     private func stopLocked() {
