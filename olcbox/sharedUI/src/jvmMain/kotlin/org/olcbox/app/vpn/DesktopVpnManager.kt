@@ -3,6 +3,7 @@ package org.olcbox.app.vpn
 import java.net.Inet4Address
 import java.net.InetAddress
 import org.olcbox.app.data.xray.XrayConfig
+import org.olcbox.app.vpn.desktop.WindowsProcessJob
 import org.olcbox.app.vpn.desktop.XrayProcess
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
@@ -570,6 +571,9 @@ class DesktopVpnManager private constructor(
             }
             throw e
         }
+        if (!WindowsProcessJob.adopt(startedProcess)) {
+            addLog("Warning: olcRTC is not tied to the app and may outlive a crash")
+        }
 
         val readerJob = scope.launch {
             try {
@@ -655,6 +659,9 @@ class DesktopVpnManager private constructor(
         } catch (e: Exception) {
             deleteOlcRtcConfig()
             throw e
+        }
+        if (!WindowsProcessJob.adopt(startedProcess)) {
+            addLog("Warning: Xray is not tied to the app and may outlive a crash")
         }
 
         logJob?.cancel()
