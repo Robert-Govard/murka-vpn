@@ -166,6 +166,17 @@ jobs:
         shell: pwsh
         run: |
           $failures = @()
+          # How soon after the app says "connected" does traffic really flow?
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          do {
+            $code = curl.exe -s -o NUL -w '%{http_code}' --max-time 5 https://www.google.com/generate_204
+            if ($code -eq '204') { break }
+            Start-Sleep -Milliseconds 500
+          } while ($watch.Elapsed.TotalSeconds -lt 30)
+          $warmup = [math]::Round($watch.Elapsed.TotalSeconds, 1)
+          "first successful request $warmup s after connect"
+          if ($code -ne '204') { $failures += "no traffic within 30 s of connect" }
+          elseif ($warmup -gt 3) { $failures += "traffic started only $warmup s after the app reported connected" }
           $serverIp = (Get-Content "$env:WORK\server-ip.txt").Trim()
           $directIp = (Get-Content "$env:WORK\direct-ip.txt").Trim()
           $trace = curl.exe -s --max-time 20 https://1.1.1.1/cdn-cgi/trace
