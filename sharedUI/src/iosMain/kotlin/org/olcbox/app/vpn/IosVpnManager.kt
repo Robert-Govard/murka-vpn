@@ -70,10 +70,21 @@ class IosVpnManager(
                     .trim()
                     .takeIf { it.isNotBlank() }
                     ?.let {
-                        addLog("rtc: $it")
+                        addLog("vpn: $it")
                     }
             }
         })
+        // The VPN extension outlives the app: show a tunnel started before this launch as connected.
+        scope.launch {
+            delay(ADOPT_RUNNING_TUNNEL_DELAY_MS)
+            if (_status.value is VpnStatus.Disconnected && !desiredConnected && olcRtcBridge.isRunning()) {
+                desiredConnected = true
+                setStatus(VpnStatus.Connected)
+                addLog("iOS VPN already connected")
+                lastReadyMark = timeSource.markNow()
+                startWatchdog()
+            }
+        }
     }
 
     override fun needsPermission(): Boolean = false
@@ -99,7 +110,7 @@ class IosVpnManager(
 
                 if (shouldRestart) {
                     setStatus(VpnStatus.Reconnecting)
-                    addLog("Restarting iOS SOCKS connection")
+                    addLog("Restarting iOS VPN")
                     stopOlcRtc()
                     if (requestedGeneration != generation) return@withLock
                 }
@@ -121,7 +132,7 @@ class IosVpnManager(
                 setStatus(VpnStatus.Stopping)
                 stopOlcRtc()
                 setStatus(VpnStatus.Disconnected)
-                addLog("iOS SOCKS stopped")
+                addLog("iOS VPN stopped")
             }
         }
     }
@@ -171,26 +182,30 @@ class IosVpnManager(
 
         if (location == null || !location.isComplete()) {
             setStatus(VpnStatus.Error("No active location"))
-            addLog("Add a valid location before starting iOS SOCKS")
+            addLog("Add a valid location before starting iOS VPN")
             return
         }
 
         val socksSettings = _socksProxySettings.value
         val result = if (location.isXray) {
-            addLog("Starting iOS SOCKS via Xray (${location.name}), port=${socksSettings.port}")
-            val config = XrayConfig.prepare(
-                raw = location.xrayConfig,
-                socksHost = "127.0.0.1",
-                socksPort = socksSettings.port,
-                username = socksSettings.username,
-                password = socksSettings.password
-            )
-            withContext(Dispatchers.Default) { olcRtcBridge.startXray(config) }
+            addLog("Starting iOS VPN via Xray (${location.name})")
+            withContext(Dispatchers.Default) {
+                // The tunnel answers DNS through Xray itself, so Xray must reach its servers by IP.
+                val pinned = XrayConfig.pinServerAddresses(location.xrayConfig) { olcRtcBridge.resolveIpv4(it) }
+                val config = XrayConfig.prepare(
+                    raw = pinned,
+                    socksHost = "127.0.0.1",
+                    socksPort = socksSettings.port,
+                    username = socksSettings.username,
+                    password = socksSettings.password
+                )
+                olcRtcBridge.startXray(config, socksSettings.port, socksSettings.username, socksSettings.password)
+            }
         } else {
             val deviceId = locationsRepository.getDeviceIdentity()
             val request = location.startRequest(deviceId, socksSettings)
             addLog(
-                "Starting iOS SOCKS provider=${location.bypassProvider}, " +
+                "Starting iOS VPN provider=${location.bypassProvider}, " +
                     "transport=${location.transport}, room=${location.id}, port=${socksSettings.port}"
             )
             withContext(Dispatchers.Default) { olcRtcBridge.start(request) }
@@ -200,14 +215,14 @@ class IosVpnManager(
 
         if (result.success) {
             setStatus(VpnStatus.Connected)
-            addLog("iOS SOCKS ready on 127.0.0.1:${socksSettings.port}")
+            addLog("iOS VPN connected")
             reconnectAttempt = 0
             lastReadyMark = timeSource.markNow()
             startWatchdog()
         } else {
             val message = result.message ?: "olcRTC start failed"
             setStatus(VpnStatus.Error(message))
-            addLog("iOS SOCKS start failed: $message")
+            addLog("iOS VPN start failed: $message")
             stopOlcRtc()
         }
     }
@@ -299,7 +314,7 @@ class IosVpnManager(
                     reconnectJob?.isActive != true &&
                     !olcRtcBridge.isRunning()
                 if (stalled) {
-                    addLog("Watchdog: iOS SOCKS transport is down")
+                    addLog("Watchdog: iOS VPN is down")
                     scheduleReconnect("transport stopped")
                 }
             }
@@ -321,7 +336,7 @@ class IosVpnManager(
             // must not give up — that is what left the transport dead before.
             while (desiredConnected && isActive) {
                 val delayMs = nextReconnectDelay()
-                addLog("Reconnecting iOS SOCKS in ${delayMs / 1000}s")
+                addLog("Reconnecting iOS VPN in ${delayMs / 1000}s")
                 delay(delayMs)
                 if (!desiredConnected) return@launch
 
@@ -432,6 +447,7 @@ class IosVpnManager(
         const val RECONNECT_MAX_DELAY_MS = 30_000L
         const val MAX_RECONNECT_BACKOFF_POWER = 3
         const val POST_CONNECT_GRACE_MS = 4_000L
+        const val ADOPT_RUNNING_TUNNEL_DELAY_MS = 1_500L
         const val CREDENTIAL_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
     }
 }
