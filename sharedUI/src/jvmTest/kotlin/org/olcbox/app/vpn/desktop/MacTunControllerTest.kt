@@ -248,6 +248,97 @@ class MacTunControllerTest {
         }
     }
 
+    /** Something resets the DNS of the service while the tunnel is up: the helper puts it back. */
+    @Test
+    fun helperReappliesDnsWhenItIsReset() {
+        if (!System.getProperty("os.name").startsWith("Mac")) return
+        val dir = Files.createTempDirectory("murka-tun-dns")
+        try {
+            val env = fakeDnsEnvironment(dir)
+            val stopFile = dir.resolve("stop")
+            val process = env.start(stopFile)
+            waitUntil { env.dns() == "1.1.1.1" }
+
+            Files.writeString(env.state, "Empty") // e.g. another app or the system reset it
+            waitUntil { env.dns() == "1.1.1.1" }
+
+            Files.writeString(stopFile, "")
+            assertTrue(process.waitFor(15, TimeUnit.SECONDS))
+            assertEquals("Empty", env.dns())
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * Switching servers starts a new helper while the old one is still up. DNS must stay on the
+     * VPN after the old helper exits, and the DNS from before the first connect comes back at the end.
+     */
+    @Test
+    fun reconnectKeepsDnsOnTheVpnAndRestoresTheOriginal() {
+        if (!System.getProperty("os.name").startsWith("Mac")) return
+        val dir = Files.createTempDirectory("murka-tun-reconnect")
+        try {
+            val env = fakeDnsEnvironment(dir)
+            Files.writeString(env.state, "192.168.1.1")
+            val first = env.start(dir.resolve("stop-1"))
+            waitUntil { env.dns() == "1.1.1.1" }
+
+            val second = env.start(dir.resolve("stop-2"))
+            assertTrue(first.waitFor(15, TimeUnit.SECONDS), "old helper did not exit")
+            Thread.sleep(1_500)
+            assertEquals("1.1.1.1", env.dns(), "DNS left the VPN after a reconnect")
+
+            Files.writeString(dir.resolve("stop-2"), "")
+            assertTrue(second.waitFor(15, TimeUnit.SECONDS))
+            assertEquals("192.168.1.1", env.dns())
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    private class DnsEnvironment(val state: Path, val start: (Path) -> Process) {
+        fun dns(): String = Files.readString(state).trim()
+    }
+
+    /** A fake `networksetup` that keeps the Wi-Fi DNS in a file, and a fake hev that idles. */
+    private fun fakeDnsEnvironment(dir: Path): DnsEnvironment {
+        val state = dir.resolve("dns.state")
+        Files.writeString(state, "Empty")
+        val networksetup = executable(
+            dir.resolve("networksetup"),
+            "#!/bin/sh\ncase \"$1\" in\n" +
+                "-listnetworkserviceorder) printf '(1) Wi-Fi\\n(Hardware Port: Wi-Fi, Device: en0)\\n';;\n" +
+                "-getdnsservers) s=$(cat '$state'); if [ \"\$s\" = Empty ]; then echo \"There aren't any DNS Servers set on Wi-Fi.\"; else echo \"\$s\"; fi;;\n" +
+                "-setdnsservers) shift 2; echo \"$*\" > '$state';;\n" +
+                "esac\n"
+        )
+        val route = executable(dir.resolve("route"), "#!/bin/sh\nexit 0\n")
+        val hev = executable(
+            dir.resolve("hev"),
+            "#!/bin/sh\nup=$(sed -n 's/.*post-up-script: //p' \"$1\")\n\"\$up\" utun99\nexec sleep 60\n"
+        )
+        val config = dir.resolve("hev.yml")
+        Files.writeString(config, MacTunController.configContent(10808, "", "", udpOverTcp = false, mapDns = false))
+        val paths = MacTunController.HelperPaths(
+            pid = dir.resolve("pid").toString(),
+            ifName = dir.resolve("ifname").toString(),
+            log = dir.resolve("hev.log").toString(),
+            route = route.toString(),
+            tmpDir = dir.toString(),
+            networksetup = networksetup.toString(),
+            dnsBackup = dir.resolve("dns.backup").toString(),
+            flushDns = "true"
+        )
+        val helper = executable(dir.resolve("helper.sh"), MacTunController.helperScript(paths))
+        return DnsEnvironment(state) { stopFile ->
+            ProcessBuilder(
+                "/bin/sh", helper.toString(), hev.toString(), config.toString(),
+                ProcessHandle.current().pid().toString(), stopFile.toString(), "en0", "192.168.50.1", "1.1.1.1"
+            ).redirectErrorStream(true).start()
+        }
+    }
+
     private fun executable(path: Path, body: String): Path {
         Files.writeString(path, body)
         path.toFile().setExecutable(true)

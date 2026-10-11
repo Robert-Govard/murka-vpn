@@ -175,6 +175,8 @@ internal class MacTunController(
         /** DNS for Xray mode; queries travel through the tunnel like any other traffic. */
         const val XRAY_DNS_SERVER = "1.1.1.1"
         const val DNS_BACKUP_PATH = "/var/db/murka-tun.dns"
+        /** How often the helper checks that the service still uses the VPN DNS. */
+        const val DNS_CHECK_SECONDS = 3
         const val STOP_FILE_NAME = "stop"
         const val IFNAME_PATH = "/var/run/murka-tun.ifname"
         const val PID_PATH = "/var/run/murka-tun.pid"
@@ -260,16 +262,33 @@ internal class MacTunController(
             echo "${'$'}phys_if" | grep -Eq '^[a-z]+[0-9]+${'$'}' || exit 2
             echo "${'$'}phys_gw" | grep -Eq '^[0-9]{1,3}([.][0-9]{1,3}){3}${'$'}' || exit 2
             [ -z "${'$'}dns_server" ] || echo "${'$'}dns_server" | grep -Eq '^[0-9]{1,3}([.][0-9]{1,3}){3}${'$'}' || exit 2
-            # DNS of the network service behind phys_if is saved and put back on stop.
+            # DNS of the network service behind phys_if is saved and put back on stop. The backup is
+            # "owner=<helper pid>", the service, then its DNS servers. Only the owner restores it, so
+            # an old helper exiting after a reconnect cannot pull DNS off the VPN.
             restore_dns() {
               [ -f ${paths.dnsBackup} ] || return 0
-              svc=${'$'}(head -n 1 ${paths.dnsBackup})
-              servers=${'$'}(tail -n +2 ${paths.dnsBackup} | tr '\n' ' ')
-              ${paths.networksetup} -setdnsservers "${'$'}svc" ${'$'}servers
+              if head -n 1 ${paths.dnsBackup} | grep -q '^owner='; then
+                owner=${'$'}(head -n 1 ${paths.dnsBackup} | cut -d= -f2)
+                [ "${'$'}owner" = "${'$'}${'$'}" ] || ! kill -0 "${'$'}owner" 2>/dev/null || return 0
+                bsvc=${'$'}(sed -n 2p ${paths.dnsBackup})
+                servers=${'$'}(tail -n +3 ${paths.dnsBackup} | tr '\n' ' ')
+              else
+                bsvc=${'$'}(head -n 1 ${paths.dnsBackup})
+                servers=${'$'}(tail -n +2 ${paths.dnsBackup} | tr '\n' ' ')
+              fi
+              ${paths.networksetup} -setdnsservers "${'$'}bsvc" ${'$'}servers
               rm -f ${paths.dnsBackup}
               ${paths.flushDns} 2>/dev/null
             }
-            restore_dns # left over from a session that never ended (power cut)
+            if [ -f ${paths.dnsBackup} ]; then
+              owner=${'$'}(head -n 1 ${paths.dnsBackup} | sed -n 's/^owner=//p')
+              if [ -n "${'$'}owner" ] && kill -0 "${'$'}owner" 2>/dev/null; then
+                # Reconnect: the previous helper still runs. Keep the DNS it saved and take it over.
+                { echo "owner=${'$'}${'$'}"; tail -n +2 ${paths.dnsBackup}; } > ${paths.dnsBackup}.new && mv ${paths.dnsBackup}.new ${paths.dnsBackup}
+              else
+                restore_dns # left over from a session that never ended (power cut)
+              fi
+            fi
             # A previous tunnel (reconnect, crashed app): stop its hev and let its helper clean up.
             if [ -f ${paths.pid} ]; then kill "${'$'}(cat ${paths.pid})" 2>/dev/null; sleep 2; fi
             rm -f ${paths.ifName}
@@ -296,20 +315,31 @@ internal class MacTunController(
             hev_pid=${'$'}!
             echo "${'$'}hev_pid" > ${paths.pid}
             chmod 644 ${paths.log}
+            svc=""
             if [ -n "${'$'}dns_server" ]; then
               svc=${'$'}(${paths.networksetup} -listnetworkserviceorder | awk -v dev="${'$'}phys_if" '
                 /^\([0-9*]+\) / { name = ${'$'}0; sub(/^\([0-9*]+\) /, "", name) }
                 index(${'$'}0, "Device: " dev ")") { print name; exit }')
               if [ -n "${'$'}svc" ]; then
-                old=${'$'}(${paths.networksetup} -getdnsservers "${'$'}svc")
-                case "${'$'}old" in *"aren't any"*) old=Empty ;; esac
-                printf '%s\n%s\n' "${'$'}svc" "${'$'}old" > ${paths.dnsBackup}
+                if [ ! -f ${paths.dnsBackup} ]; then
+                  old=${'$'}(${paths.networksetup} -getdnsservers "${'$'}svc")
+                  case "${'$'}old" in *"aren't any"*) old=Empty ;; esac
+                  printf 'owner=%s\n%s\n%s\n' "${'$'}${'$'}" "${'$'}svc" "${'$'}old" > ${paths.dnsBackup}
+                fi
                 ${paths.networksetup} -setdnsservers "${'$'}svc" "${'$'}dns_server"
                 ${paths.flushDns} 2>/dev/null
               fi
             fi
+            ticks=0
             while kill -0 "${'$'}app_pid" 2>/dev/null && kill -0 "${'$'}hev_pid" 2>/dev/null && [ ! -e "${'$'}stop_file" ]; do
               sleep 1
+              ticks=${'$'}((ticks + 1))
+              # Something reset the DNS (system, another app): queries would leave past the VPN.
+              if [ -n "${'$'}svc" ] && [ ${'$'}((ticks % $DNS_CHECK_SECONDS)) -eq 0 ] &&
+                [ "${'$'}(${paths.networksetup} -getdnsservers "${'$'}svc" | head -n 1)" != "${'$'}dns_server" ]; then
+                ${paths.networksetup} -setdnsservers "${'$'}svc" "${'$'}dns_server"
+                ${paths.flushDns} 2>/dev/null
+              fi
             done
             kill "${'$'}hev_pid" 2>/dev/null
             for _ in 1 2 3; do kill -0 "${'$'}hev_pid" 2>/dev/null || break; sleep 1; done
