@@ -1062,7 +1062,7 @@ class OlcboxVpnService : VpnService() {
             NotificationCompat.Builder(this, HINT_CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(text)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(org.olcbox.app.sharedui.R.drawable.ic_murka_silhouette)
                 .setContentIntent(getAppPendingIntent())
                 .setAutoCancel(true)
                 .addAction(0, button, switchIntent)
@@ -1661,7 +1661,7 @@ class OlcboxVpnService : VpnService() {
         NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle(if (connectionMode == AndroidConnectionMode.Proxy) "Мурка VPN · прокси" else "Мурка VPN")
             .setContentText(status)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(org.olcbox.app.sharedui.R.drawable.ic_murka_silhouette)
             .setOngoing(true)
             .setContentIntent(getAppPendingIntent())
             .addAction(

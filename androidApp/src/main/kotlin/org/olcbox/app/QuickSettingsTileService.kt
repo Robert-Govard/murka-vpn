@@ -19,7 +19,7 @@ import org.olcbox.app.vpn.service.OlcboxVpnActions
 import org.olcbox.app.vpn.service.OlcboxVpnState
 
 /**
- * Android Quick Settings tile that toggles the Olcbox VPN on/off.
+ * Android Quick Settings tile that toggles Murka VPN on/off.
  *
  * Appears in the notification shade. Tap it to start or stop the VPN.
  * If VPN permission hasn't been granted yet, opens the main app instead.
