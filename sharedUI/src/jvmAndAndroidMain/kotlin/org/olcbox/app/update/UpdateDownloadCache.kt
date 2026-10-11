@@ -72,6 +72,7 @@ internal class UpdateDownloadCache(private val directory: File) {
                 }
                 coroutineContext.ensureActive()
                 if (!partial.renameTo(target)) throw IOException("Could not save downloaded update")
+                removeOtherDownloads(keep = target)
                 onProgress(1f)
                 target
             } finally {
@@ -79,6 +80,13 @@ internal class UpdateDownloadCache(private val directory: File) {
                 partial.delete()
             }
         }
+    }
+
+    /** Releases are 30-160 MB each: keep only the newest download, plus no stale partial files. */
+    private fun removeOtherDownloads(keep: File) {
+        directory.listFiles().orEmpty()
+            .filter { it != keep }
+            .forEach { it.deleteRecursively() }
     }
 
     private fun targetFile(asset: AppUpdateAsset): File {

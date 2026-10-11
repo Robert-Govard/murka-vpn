@@ -24,9 +24,23 @@ class UpdateDownloadCacheTest {
             assertEquals(1, requests())
             val changed = asset.copy(updatedAt = "second")
             assertNull(restored.downloadedFile(changed))
+            val firstBytes = first.readBytes()
             val second = restored.download(changed)
-            assertContentEquals(first.readBytes(), second.readBytes())
+            assertContentEquals(firstBytes, second.readBytes())
             assertEquals(2, requests())
+        }
+    }
+
+    @Test
+    fun newDownloadRemovesOlderUpdatesAndLeftovers() = runBlocking {
+        withDownloadServer { directory, url, _ ->
+            val cache = UpdateDownloadCache(directory)
+            val old = cache.download(AppUpdateAsset("update.apk", url, 8192, "1.0.1"))
+            val stalePart = java.io.File(directory, "abc-update-1.0.0.apk.part").apply { writeText("x") }
+            val current = cache.download(AppUpdateAsset("update.apk", url, 8192, "1.0.2"))
+            // Every release is ~30-160 MB: keeping them all filled users' disks.
+            assertEquals(listOf(current.name), directory.listFiles().orEmpty().map { it.name })
+            assertTrue(!old.exists() && !stalePart.exists())
         }
     }
 
